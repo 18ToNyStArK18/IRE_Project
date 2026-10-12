@@ -25,3 +25,6 @@ outputs/
 .idea/
 *.swp
 .DS_Store
+
+# Test caches
+.pytest_cache/

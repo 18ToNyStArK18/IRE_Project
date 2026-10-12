@@ -94,7 +94,7 @@ Decisions for *Relevance or Recency? Diagnosing the Temporal Shortcut in LLM-Bas
 - `.gitignore` covers LaTeX build files, Python clutter, `data/` and `outputs/`.
 
 ## 10. Open items
-- Update report Eq. 1 / §3.1 to the global cutoff; add `T`, `w`, history length, SASRec, and quantization as a limitation.
+- ~~Update report Eq. 1 / §3.1 to the global cutoff; add `T`, `w`, history length, SASRec, and quantization as a limitation.~~ Done.
 - ~~Fix `T` and `w` after the Phase 0 audit.~~ Done (§11).
 - ~~Settle the Amazon launch-date rule and rating/k-core filtering.~~ Done (§11).
 - Optional wording change: call the non-LLM rankers "reference heuristics" to avoid confusion with the Netflix baseline.
