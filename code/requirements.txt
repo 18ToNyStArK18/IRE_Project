@@ -1,0 +1,21 @@
+# Cluster environment (Python 3.10 recommended). On the CPU-only dev machine only
+# the non-GPU part is needed (pandas ... sentence-transformers).
+pandas>=2.0
+pyarrow>=14
+numpy>=1.26
+scipy>=1.11
+pyyaml>=6
+tqdm>=4.66
+torch>=2.1
+transformers>=4.40
+sentence-transformers>=2.7
+pytest>=8
+
+# --- GPU inference (ADA, RTX 2080 Ti / sm_75) ---
+vllm            # check it runs on sm_75 with: python -m coldrank.llm.run --model llama2_7b --method direct --limit 2
+autoawq         # HF fallback for the AWQ checkpoints
+optimum         # HF fallback for Qwen-7B-Chat-Int4 (GPTQ)
+auto-gptq
+tiktoken        # Qwen-7B-Chat tokenizer
+einops          # Qwen-7B-Chat remote code
+transformers_stream_generator  # Qwen-7B-Chat remote code

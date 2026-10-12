@@ -1,0 +1,40 @@
+# Amazon Reviews 2023 - Video Games. Every value here is logged in design.md.
+dataset: amazon_vg
+
+# --- split (coldrank.data.split) ---
+cutoff_T: 2022-09-01      # global cutoff (Phase 0 audit; design.md)
+window_days: 180         # test window [T, T + 180 days)
+rating_threshold: 3.0    # positive = rating >= 3.0 (Dong et al. Amazon setting)
+min_history: 5           # users need >= 5 positives before T
+n_dev: 150
+n_test: 1000
+seed: 42
+
+# --- warm-start ranker (coldrank.warm.sasrec) ---
+sasrec:
+  kcore: 5               # iterative 5-core on pre-T positives (training data only)
+  max_seq_len: 50        # Dong et al.
+  hidden: 64
+  n_layers: 2
+  n_heads: 2
+  dropout: 0.2
+  lr: 0.001
+  batch_size: 256
+  max_epochs: 200
+  patience: 10           # early stopping on validation NDCG@10 (checked every epoch)
+  seed: 42
+
+# --- pools (coldrank.pools.build) ---
+pool:
+  n_warm: 40
+  n_cold: 10             # gold + 9 negatives
+  neg_settings: [random, hard]
+  embed_model: sentence-transformers/all-MiniLM-L6-v2
+  profile_len: 20        # user profile = mean embedding of the last 20 history items (= displayed history)
+  dup_threshold: 0.9     # drop cold negatives with cosine >= 0.9 to the gold (other editions of it)
+
+# --- prompts (coldrank.prompts.render) ---
+prompt:
+  history_len: {direct: 20, base: 20, fast: 40, structural: 20, ssc: 20, pointwise: 20}
+  top_n: 10              # listwise output length
+  shuffles: 3

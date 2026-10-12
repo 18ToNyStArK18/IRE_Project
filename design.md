@@ -163,3 +163,16 @@ Every choice made while implementing `code/`, with the reason. Values live in `c
 
 ### Tests
 - `code/tests/`: 38 tests covering the split invariants and audit/split agreement, SASRec (NaN-free masking, causality, learns a pattern), pool invariants and exclusions, rendering, parsing, metrics, heuristics, statistics, and an end-to-end HF run with SmolLM2-135M (`-m slow`).
+
+### First results (Amazon VG test, 800 pools; `outputs/amazon_vg/baseline/report_test/summary.md`)
+- **Warm ranker sanity:** SASRec validation NDCG@10 = 0.064; on old-target test users, Recall@10 = 0.033 against 0.009 for popularity. Popularity fallback for 0.6% of users.
+- **Pools:** all 1,900 pass the invariants; none dropped. The gold item is about 3 years newer than the median warm candidate and is the single newest candidate in 10% of pools (chance among the 10 cold items).
+- **Reference heuristics, Recall@1, random / hard negatives:**
+  - random: 0.029 / 0.024;
+  - random-among-newest: 0.111 / 0.102;
+  - newest-first: 0.095 / 0.090;
+  - content only: 0.041 / 0.009;
+  - **newest-10 filter + content: 0.324 / 0.009**;
+  - SASRec and popularity: 0 / 0 (they cannot rank cold items).
+- **Hard negatives are adversarial to content matching**, not just harder: they are the cold items most similar to the history (mean similarity 0.73 against 0.54 for the gold), so any similarity-based ranker almost never ranks the gold first. Read hard-negative results as a stress test.
+- **Local environment note:** model loading can hang on a stalled Hugging Face CDN connection even when the files are cached; set `HF_HUB_OFFLINE=1` once models are downloaded.

@@ -1,0 +1,61 @@
+# One fixed checkpoint per model, pinned to a commit, used in every condition
+# (paired comparisons must see identical weights). See design.md Sec. 8.
+#
+# family: prompt format implemented in coldrank/llm/chat.py
+# max_model_len: 4096 for every listwise model (parity); Phi-2 is 2048.
+# listwise: false -> pointwise only (context too small for a 50-candidate prompt)
+
+phi2:
+  hf_id: microsoft/phi-2
+  revision: 810d367871c1d460086d9f82db8696f2e0a0fcd0
+  quantization: null          # fp16 (~5.5 GB)
+  family: phi2
+  max_model_len: 2048
+  listwise: false
+  trust_remote_code: false
+
+llama2_7b:
+  hf_id: TheBloke/Llama-2-7B-Chat-AWQ
+  revision: ee91097dc818c742d9b648147891dfadd9638ace
+  quantization: awq
+  family: llama2
+  max_model_len: 4096
+  listwise: true
+  trust_remote_code: false
+
+llama2_13b:
+  hf_id: TheBloke/Llama-2-13B-chat-AWQ
+  revision: e609cfc317ae4da50bb1839b8dcc3bf3a65f0fb7
+  quantization: awq
+  family: llama2
+  max_model_len: 4096
+  listwise: true
+  trust_remote_code: false
+
+mistral_7b:
+  hf_id: TheBloke/Mistral-7B-Instruct-v0.1-AWQ
+  revision: b2f7c152209c12057c3a0d77b2c01a1def7d594f
+  quantization: awq
+  family: mistral
+  max_model_len: 4096          # native 8k, capped for parity
+  listwise: true
+  trust_remote_code: false
+
+qwen_7b:
+  hf_id: Qwen/Qwen-7B-Chat-Int4
+  revision: 5a9a1ed9203a3d4ccc62f24fbb9b7e3948ce8ec1
+  quantization: gptq
+  family: chatml
+  max_model_len: 4096          # native 8k, capped for parity
+  listwise: true
+  trust_remote_code: true      # Qwen v1 ships custom modeling/tokenizer code (needs `tiktoken`)
+
+# Local CPU smoke tests only (not a study model).
+smol_135m:
+  hf_id: HuggingFaceTB/SmolLM2-135M-Instruct
+  revision: 12fd25f77366fa6b3b4b768ec3050bf629380bac
+  quantization: null
+  family: chatml
+  max_model_len: 4096
+  listwise: true
+  trust_remote_code: false
