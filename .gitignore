@@ -1,0 +1,27 @@
+# LaTeX build artifacts (report/Report.pdf itself is kept)
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.toc
+*.synctex.gz
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Datasets and model outputs (large; download/regenerate instead of committing)
+data/
+outputs/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

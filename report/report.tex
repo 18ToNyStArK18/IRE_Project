@@ -1,0 +1,298 @@
+\documentclass[11pt]{article}
+
+% ------------------------------------------------------------
+% ACL style. Options: [review] = anonymous submission,
+% [final] = camera-ready with author names, [preprint] = with page numbers.
+% ------------------------------------------------------------
+\usepackage[final]{acl}
+
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{inconsolata}
+\usepackage{graphicx}
+
+% Extra packages
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\setlist{itemsep=0.1em, topsep=0.3em}
+
+\newcommand{\tpr}{\mathrm{TPR}}
+\newcommand{\hit}{\mathrm{HR@1}}
+
+% ------------------------------------------------------------
+% Title and authors
+% ------------------------------------------------------------
+\title{Relevance or Recency? Diagnosing the Temporal Shortcut\\
+in LLM-Based Cold-Start Reranking}
+
+\author{
+  Veda Vyas Bysani \\ IIIT Hyderabad \And
+  Ayush Daga \\ IIIT Hyderabad \And
+  Sanjith Ganapathi \\ IIIT Hyderabad
+}
+
+\begin{document}
+\maketitle
+
+% ============================================================
+\begin{abstract}
+Large language models (LLMs) are increasingly deployed as the final reranking stage of recommender pipelines, on the premise that their semantic understanding is most valuable where interaction data is scarce: new items and cold-start users. We ask whether an LLM reranker's apparent success on new items reflects genuine semantic relevance modeling, or merely a prior preference for \emph{newness}. Such a heuristic appears correct in fast-moving domains such as news, but is silently wrong in stable catalogs where age carries no information about quality. We reproduce the cold-start reranking protocol of \citet{li2026llmreasoning} on public data and show that it contains a built-in shortcut: the target is always one of the newest candidates. We then apply adversarial variants that \emph{decorrelate} recency from relevance, including pools where the relevant item is old and the newest items are irrelevant ``traps,'' date hiding, swapping and shuffling, and flooding the pool with freshly dated items. Together with position-order controls, this lets us decompose a reranker's cold-start performance into an \emph{evidence effect} and a \emph{recency-prior effect}, extending the popularity-prior decomposition of \citet{dong2026diagnosing} to the temporal axis. We run the diagnostic on two domains at opposite ends of the volatility spectrum, EB-NeRD news \citep{kruse2024ebnerd} and Amazon Video Games \citep{hou2024bridging}, using five open LLMs released in 2023 whose training data predates both datasets. The expected output is a per-domain estimate of how much of an LLM's cold-start advantage survives once the recency shortcut is removed.
+\end{abstract}
+
+% ============================================================
+\section{Introduction}
+
+LLMs are now routinely used as zero-shot or lightly tuned rerankers over a short candidate list produced by a cheaper retriever \citep{sun2023rankgpt, hou2024llmrank}. A common motivation is the cold-start problem: collaborative signals are absent for new items, so a model that can read item content and reason about a user's history should outperform ID-based methods precisely there.
+
+However, the standard evaluation protocol for cold-start contains a hidden confound. Cold-start test sets are typically created with a \emph{temporal split}: items that first appear after a cutoff are treated as new. For example, \citet{li2026llmreasoning} define cold-start items as those launched after the latest interaction in every user history, and after the training cutoff of the base LLM, and use these items exclusively as ground-truth targets in the cold-start evaluation set. Their cold-start results are reported only as relative improvements between methods, not as absolute Recall@1, so they cannot be compared with what a date-only heuristic would achieve on the same pools. In such a split, the item a user interacts with next is, by construction, disproportionately likely to be recent; in the setting above, every gold item is newer than everything the user has interacted with. A reranker that simply prefers recent items will therefore score well without reading content at all. Benchmarks cannot distinguish this shortcut from genuine relevance modeling, because in the benchmark the new item usually \emph{is} the correct answer.
+
+This matters for three reasons:
+\begin{enumerate}
+  \item \textbf{Scaling does not fix a heuristic.} If cold-start gains are largely a recency effect, larger rerankers may simply apply the same shortcut more confidently.
+  \item \textbf{Benchmarks over-credit LLMs.} Reported cold-start improvements would overstate semantic capability.
+  \item \textbf{Deployment risk.} In domains where newer is not better (most e-commerce, evergreen content), a recency-biased reranker buries good older items. It also creates a manipulation surface: flooding a catalog with freshly timestamped, low-quality items.
+\end{enumerate}
+
+\paragraph{Research question.} \emph{When an LLM reranker succeeds on new items, how much of that success is attributable to semantic relevance, and how much to a preference for recency?}
+
+\paragraph{Contributions.} We propose to:
+\begin{itemize}
+  \item reproduce the \textbf{Netflix-style cold-start reranking protocol} of \citet{li2026llmreasoning} on public data, and quantify the date-only shortcut it contains;
+  \item apply \textbf{adversarial variants} of that protocol (old-gold pools, date swap, hide and shuffle, and fresh-date flooding), each changing a single factor;
+  \item define a \textbf{recency-prior decomposition}, the temporal analogue of the popularity-based decomposition in \citet{dong2026diagnosing};
+  \item compare a \textbf{volatile domain} (news) against a \textbf{static domain} (video games), where recency is respectively a genuine and a spurious signal, and test whether the effect changes with \textbf{model scale}.
+\end{itemize}
+
+% ============================================================
+\section{Related Work}
+
+\subsection{LLMs as Rerankers}
+LLMs have been shown to be effective zero-shot rankers in both passage retrieval \citep{sun2023rankgpt} and sequential recommendation \citep{hou2024llmrank}. \citet{hou2024llmrank} further document that LLM rankers are sensitive to the \emph{order} in which candidates are presented and are biased toward popular items. These findings motivate our position controls, and suggest that non-semantic priors may drive a substantial fraction of LLM ranking behavior.
+
+Recency is one such prior. \citet{fang2025recency} prepend artificial publication dates to TREC Deep Learning passages and find that seven LLM rerankers, from Llama-3 8B to GPT-4o, consistently promote passages that look newer: the mean publication year of the Top-10 moves forward by up to 4.78 years, and for passage pairs with identical relevance labels the injected dates reverse the model's preference in up to 25\% of cases. Larger models reduce the effect but do not remove it. Our date interventions (A2--A4) follow the same idea of changing the displayed date while keeping the content fixed. In recommendation, LLMs have been observed to suggest newer movies than collaborative baselines \citep{deldjoo2024chatgptbias, eberhard2024narrative}, though without date interventions or relevance controls.
+
+\subsection{Diagnosing LLM Cold-Start Recommendation}
+Our anchor is \citet{dong2026diagnosing}. In gold-injected candidate pools, they find only ``pockets'' of semantic cold-start advantage for LLM rerankers, concentrated in text-rich news. End-to-end, this advantage is largely unreachable: retrievers rarely surface new items, and when they do, prompt-level LLM reranking often demotes correct items that a lightweight learned ranker keeps. Their Table~7 decomposes the gain of a graph-augmented prompt into an \emph{evidence effect} and a \emph{tail-prior effect}. On Video Games the evidence effect is slightly negative ($-0.017$) while the tail-prior effect is large ($+0.208$), and the gain largely disappears under natural traffic. Their tail prior is injected externally, through a popularity cue in the prompt and an additive score bonus. We instead measure a prior internal to the model, a preference for recent items, using date interventions on fixed items. Their temporal split serves to create cold-start items, and they study its effect on retrieval coverage, not whether rerankers favor newer items.
+
+\subsection{Recency as a Genuine Signal}
+In news recommendation, freshness is a real component of relevance. The MIND benchmark \citep{wu2020mind} and the RecSys Challenge 2024 dataset EB-NeRD \citep{kruse2024ebnerd} are both characterized by very short item lifetimes, and strong solutions to the 2024 challenge engineer time-since-publication features explicitly. This provides the contrasting case to our static domain: a recency preference is \emph{justified} in news and \emph{unjustified} in a stable product catalog.
+
+\subsection{Gap}
+The literature offers (i) a decomposition method for a popularity artifact in LLM cold-start reranking, (ii) evidence that LLM passage rerankers prefer newer-dated text \citep{fang2025recency}, and (iii) separate evidence that recency is a genuine signal in volatile domains. To our knowledge, no prior work asks whether recency explains the reported cold-start advantage of LLM rerankers in recommendation, where temporal splits make the gold item systematically new, or tests this with candidate pools in which recency and relevance point in opposite directions and in domains where recency is and is not a valid signal.
+
+% ============================================================
+\section{Methodology}
+
+Our method has two parts. First, we reproduce the cold-start reranking protocol of \citet{li2026llmreasoning} on public data (\S\ref{sec:baseline}). Second, we apply a set of \emph{adversarial variants} to that protocol, each of which changes a single factor so that recency and relevance can be separated (\S\ref{sec:adv}).
+
+\subsection{Problem Setup}
+For a user $u$ with a chronologically ordered interaction history $H_u$, a reranker $f$ receives a candidate pool $C$ of size $K$ and outputs a permutation $\pi$ of $C$. Each candidate $c$ has textual attributes $x_c$ (title and genre or category) and a launch time $t_0(c)$. Exactly one candidate $g \in C$ is the ground-truth item, i.e.\ the item the user actually interacted with next.
+
+Following \citet{li2026llmreasoning}, an item is \emph{cold-start} for user $u$ if it was launched after the user's latest historical interaction:
+\begin{equation}
+  c \in \mathcal{C}_u^{\text{cold}} \iff t_0(c) > \max_{h \in H_u} t(h).
+\end{equation}
+All other candidates are \emph{warm}.
+
+\subsection{Datasets and Launch Time}
+The Netflix data used by \citet{li2026llmreasoning} is proprietary, so we reproduce their protocol, not their numbers, on two public domains at opposite ends of the volatility spectrum:
+\begin{itemize}
+  \item \textbf{EB-NeRD} \citep{kruse2024ebnerd} (volatile). Impression logs from the Danish news site Ekstra Bladet, collected between 27 April and 8 June 2023 and released in 2024. Unlike MIND \citep{wu2020mind}, every article carries an explicit publication time, which we use as $t_0(c)$; $x_c$ contains title, subtitle, category and subcategory. Test-set clicks are not public, so we use the training and validation splits.
+  \item \textbf{Amazon Video Games} \citep{hou2024bridging} (static). Part of Amazon Reviews 2023 (reviews up to September 2023, released in 2024). $t_0(c)$ is the product's \emph{Date First Available} when listed in its metadata and its first review timestamp otherwise; $x_c$ contains title, category and brand.
+\end{itemize}
+For Amazon Video Games we reuse the preprocessing and retriever code released with \citet{dong2026diagnosing}; EB-NeRD is not part of their benchmark, so we build its temporal split and warm-start ranker with the same procedure.
+
+\subsection{Pretraining Exposure}\label{sec:exposure}
+\citet{li2026llmreasoning} require cold-start items to be launched after the base LLM's training cutoff, so the model cannot already know them. We approximate this condition by pairing datasets released in 2024 with models released in 2023 (\S\ref{sec:models}). Both datasets were published after all five models, so the models cannot have been trained on the datasets themselves. For Llama~2, whose pretraining data has a documented cutoff of September 2022 \citep{touvron2023llama2}, every EB-NeRD interaction and every Amazon item launched after that date is genuinely unseen. For the other models the cutoff is not published, and the underlying web pages (news articles and product listings) may have been crawled before the dataset release; older Amazon items in particular are likely to be familiar to every model. Even where exposure occurs, it matters less for our study than for a benchmark of absolute cold-start accuracy, because our central measurements are paired comparisons: each adversarial variant presents the same user, the same items and the same model, and changes only the displayed date or the pool composition. Whatever the model has memorized about an item is identical on both sides of the comparison and cancels out of $\Delta_{\text{recency}}$. The one way exposure can distort our results is when the model already knows an item's true release date and relies on it rather than on the displayed date, so that showing, hiding or swapping the date changes its behavior less. This would make $\Delta_{\text{recency}}$ \emph{smaller}. Pretraining exposure can thus hide a recency effect but cannot create one, so the effects we report are conservative estimates. To make this visible, we ask each model for the release year of every item given only its title, label items it dates correctly as \emph{known}, and report all results separately for known and unknown items.
+
+\subsection{Baseline: Netflix-Style Cold-Start Reranking}\label{sec:baseline}
+
+\paragraph{Candidate pool.} For each test instance whose target $g$ is cold-start, we build a pool of $K = 50$ candidates as in \citet{li2026llmreasoning}:
+\begin{equation}
+  C = C^{\text{warm}}_{40} \;\cup\; C^{\text{cold}}_{10},
+\end{equation}
+where $C^{\text{warm}}_{40}$ are the top 40 items from a warm-start ranker trained on the training period (our stand-in for Netflix's production ranker), and $C^{\text{cold}}_{10}$ are 10 cold-start items, one of which is $g$. Items already in $H_u$ are excluded from both parts. The 9 cold negatives are drawn in two ways, and we report both: \emph{random}, sampled uniformly from items that are cold for $u$ and that $u$ did not interact with; and \emph{hard}, the 9 such items most similar in content to $H_u$. The hard setting prevents a model from scoring well by spotting the cold items and then choosing among weak distractors.
+
+\paragraph{Prompt.} Each candidate is shown with its \emph{title, launch date and genre}, matching the item attributes used by \citet{li2026llmreasoning}. The user's recent history is listed chronologically in the same format.
+
+\paragraph{Reranking methods.} We implement the prompting strategies of \citet{li2026llmreasoning}:
+\begin{itemize}
+  \item \textbf{Direct-Rec:} the model directly ranks the candidates without intermediate reasoning.
+  \item \textbf{Base-Reason:} the model first summarizes the user's interests, then reasons about which candidate fits. The prompt includes two worked examples.
+  \item \textbf{Fast-Reason:} Base-Reason with twice the history length, shorter example reasoning and a single worked example. It is the reference method against which \citet{li2026llmreasoning} report relative gains.
+  \item \textbf{Soft Self-Consistency:} the model generates several reasoning paths about the user's preferences and softly summarizes them into a single ranking, rather than taking a strict majority vote.
+  \item \textbf{Structural Reasoning:} the model builds reasoning paths from factors in the history (for games: genre, brand, platform; for news: category, subcategory, named entities), scores each candidate against each path, and aggregates the scores with importance weights.
+\end{itemize}
+In the original Structural Reasoning prompt, the model is told to set the importance weights by ``factor prominence, action type, and recency.'' A recency preference under this method may therefore be partly instructed rather than a prior of the model. We run the prompt as published and, on the baseline and A2 pools, a variant with ``recency'' removed from the weighting instruction.
+
+\citet{li2026llmreasoning} fine-tune Qwen-2.5-32B-Instruct with SFT, GRPO and SFT followed by GRPO. On cold-start items, GRPO gives the largest gain on their primary Discovery metric, while SFT followed by GRPO is best only in the warm-start setting, where it exceeds the improvement of Netflix's production model by 8\% on Discovery. Fine-tuning a 32B model is beyond our compute, so our main experiments use no fine-tuning: prompts are zero-shot, except that Base-Reason and Fast-Reason keep their worked examples. A small QLoRA SFT run on our largest model is a stretch goal. A zero-shot model's preference for recency is a prior from pretraining, whereas SFT on temporally split data could teach the shortcut directly, so the SFT run would test the setting of \citet{li2026llmreasoning} more closely.
+
+\paragraph{Pointwise control.} Listwise ranking of 50 candidates is demanding for small models and is affected by parse failures and candidate order. As a control, we also score each candidate independently: the prompt contains the user's history and a single candidate, the score is $\log p(\text{Yes}) - \log p(\text{No})$ for whether the user will engage with it, and candidates are ranked by score. This variant has no parse failures, no order effects, and fits in a short context window. It is run for every model and condition, alongside Direct-Rec.
+
+\paragraph{Metric.} As in \citet{li2026llmreasoning}, the primary metric is Recall@1 (whether $g$ is ranked first). We also report NDCG@10.
+
+\paragraph{The built-in shortcut.} In this pool, $g$ is \emph{always} one of the 10 cold-start items, and cold-start items are by definition newer than everything in the user's history. A ranker that ignores content and picks uniformly among the 10 newest candidates therefore achieves
+\begin{equation}
+  \text{Recall@1} = \tfrac{1}{10} = 0.10,
+\end{equation}
+five times the random baseline of $\tfrac{1}{50} = 0.02$. This is a lower bound on what dates alone can achieve: if the target tends to be the very newest candidate, as is common in news, \emph{newest-first} scores higher still. Any LLM gain over random must be read against these date-only references.
+
+\subsection{Adversarial Variants}\label{sec:adv}
+
+Each variant keeps the pool size, prompt template and reranking method of its reference condition and changes one factor (Table~\ref{tab:conditions}). A2--A4 and A6 are built from the same test instances as the baseline. A1 requires instances whose target is old, so it uses a different set of instances; A1-ctrl and A5 are built from those same A1 instances.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabularx}{\columnwidth}{@{}l X@{}}
+\toprule
+\textbf{Condition} & \textbf{What changes} \\
+\midrule
+Baseline & 40 warm + 10 cold candidates; $g$ is cold; true dates \\
+\addlinespace
+A1 Old-gold & $g$ is warm; the 10 cold slots are traps \\
+A1-ctrl & A1, with the 10 trap slots filled by warm items \\
+A2 Date swap & Dates of $g$ and one warm item exchanged \\
+A3 Date hide & No dates shown (candidates and history) \\
+A4 Date shuffle & Dates permuted across all 50 candidates \\
+A5 Fresh flood & A1, plus $n$ low-similarity warm negatives relabeled as new \\
+A6 All-cold & All 50 candidates are cold-start \\
+\bottomrule
+\end{tabularx}
+\caption{Baseline and adversarial conditions. Each variant changes one factor relative to its reference: the baseline for A2--A4 and A6, and A1 for A1-ctrl and A5. A1 uses different instances from the baseline.}
+\label{tab:conditions}
+\end{table}
+
+\begin{description}[leftmargin=1.2em]
+  \item[A1 Old-gold (inverted pool).] We select test instances whose target is a \emph{warm} (old) item. The pool contains $g$ among 40 warm candidates, and the 10 cold-start slots are filled with new items the user did not interact with, which act as \emph{traps}. Recency and relevance now point in opposite directions.
+  \item[A1-ctrl Old-gold control.] The same A1 instances, but the 10 trap slots are filled with additional warm items, so no candidate is newer than the user's history. Because A1 and the baseline use different instances, which may differ in difficulty and in target popularity, the paired comparison of A1 against A1-ctrl is what isolates the effect of the traps.
+  \item[A2 Date swap.] The baseline pool, but the displayed launch date of $g$ is exchanged with that of a random warm candidate. The target now \emph{looks} old and a warm item \emph{looks} new, while all content is unchanged.
+  \item[A3 Date hide.] The launch-date field is removed from both the candidates and the history items, leaving only title and genre. The history is still listed in chronological order.
+  \item[A4 Date shuffle.] Launch dates are randomly permuted across all 50 candidates. The prompt format is unchanged, but the dates carry no information.
+  \item[A5 Fresh flood.] Starting from A1, $n \in \{1, 2, 5, 10\}$ irrelevant warm candidates are relabeled with launch dates newer than the user's history. We relabel the $n$ warm negatives with the lowest content similarity to $H_u$, so that the flood slope reflects the new dates rather than the similarity of the relabeled items. This simulates the manipulation of flooding a catalog with freshly timestamped junk.
+  \item[A6 All-cold (neutral).] All 50 candidates are cold-start items, so recency no longer separates $g$ from the negatives. The 49 negatives are drawn as in the baseline, in both the random and the hard setting.
+\end{description}
+
+For A1, traps must be genuinely irrelevant. In EB-NeRD they are drawn from articles shown to the user but not clicked; in Amazon, from items with low content similarity to $H_u$ and no interaction by $u$. We report the age gap and content similarity between $g$ and the traps as a manipulation check.
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabularx}{\textwidth}{@{}l X X@{}}
+\toprule
+\textbf{Thread} & \textbf{Work} & \textbf{Deliverable} \\
+\midrule
+1. Baseline &
+Build temporal splits; train the warm-start ranker; build Netflix-style 40+10 pools; implement Direct-Rec, Base-Reason, Fast-Reason, Soft Self-Consistency and Structural Reasoning prompts and the pointwise control. &
+Reproduced baseline Recall@1 for every method, alongside date-only baselines. \\
+\addlinespace
+2. Adversarial variants &
+Build A1--A6 and A1-ctrl; implement shuffled-order bootstrapping; run manipulation checks. &
+Versioned pool files; manipulation-check statistics. \\
+\addlinespace
+3. Decomposition &
+Compute Cold@1, Trap@1, $\Delta_{\text{evidence}}$, $\Delta_{\text{recency}}$, swap sensitivity, trap effect and flood slope; run significance tests and the domain $\times$ condition regression. &
+Per-domain decomposition table with CIs. \\
+\addlinespace
+4. Scale check &
+Repeat the core conditions across the five models, including Llama~2 at 7B and 13B. &
+Recency effect vs.\ model size plot. \\
+\bottomrule
+\end{tabularx}
+\caption{Project threads, divided among the three authors by workload (see \S\ref{sec:plan}).}\label{tab:plan}
+\end{table*}
+
+\subsection{Position Controls}
+LLM rankers are sensitive to candidate order \citep{hou2024llmrank}. Following their bootstrapping strategy, every pool is ranked three times with the candidate order shuffled each time, and the rankings are aggregated. We also report the residual position effect so that it is not confounded with recency. The pointwise control is unaffected by order, since each candidate is scored on its own.
+
+\subsection{Metrics}
+Let $\pi(1)$ be the top-ranked candidate. In addition to Recall@1 and NDCG@10, we report:
+\begin{itemize}
+  \item \textbf{Cold@1:} the fraction of instances in which $\pi(1)$ is a cold-start (or new-dated) item. On the baseline pool, chance is $10/50 = 0.2$.
+  \item \textbf{Trap@1:} on A1 and A5 (and, for comparison, on the matching slots of A1-ctrl), the fraction of instances in which $\pi(1)$ is a trap, i.e.\ a new but irrelevant item.
+\end{itemize}
+
+\subsection{Recency-Prior Decomposition}
+Following the evidence/tail-prior split of \citet{dong2026diagnosing}, we separate a reranker's Recall@1 into what it gains from content and what it gains from displayed recency:
+\begin{align}
+  \Delta_{\text{evidence}} &= R_{\text{hide}} - R_{\text{random}}, \\
+  \Delta_{\text{recency}}  &= R_{\text{true}} - R_{\text{hide}},
+\end{align}
+where $R$ is Recall@1 on the baseline pool under the given condition, so that $R_{\text{true}} - R_{\text{random}} = \Delta_{\text{evidence}} + \Delta_{\text{recency}}$ exactly. $\Delta_{\text{recency}}$ is what the model gains from \emph{seeing} the dates. $\Delta_{\text{evidence}}$ is everything the model achieves without dates; besides content relevance, it can still include recency implied by the content, position effects and popularity priors, so we read it as an upper bound on semantic evidence and check it against the pointwise control. We also report:
+\begin{itemize}
+  \item the \textbf{swap sensitivity} $S_{\text{swap}} = R_{\text{true}} - R_{\text{swap}}$: how much Recall@1 falls when \emph{only} the displayed dates of $g$ and one warm item are exchanged. It combines the loss of the target's recency cue with a distractor gaining one, so it is not a term of the decomposition, and it can exceed $\Delta_{\text{recency}}$;
+  \item the \textbf{trap effect} $R_{\text{A1-ctrl}} - R_{\text{A1}}$: how much Recall@1 falls on the same old-gold instances when the 10 newest slots are filled with fresh-dated traps. The raw gap $R_{\text{baseline}} - R_{\text{A1}}$ is reported descriptively, since it also reflects differences between the two instance sets;
+  \item the \textbf{flood slope}: the change in Recall@1 per fresh-dated trap in A5.
+\end{itemize}
+A reranker that models relevance should show $\Delta_{\text{evidence}} \gg 0$, $\Delta_{\text{recency}} \approx 0$, a small swap sensitivity and trap effect, and a flat flood slope in the static domain.
+
+\subsection{Statistical Testing}
+Per-instance outcomes are paired across conditions built from the same test instances: the baseline with A2--A4 and A6, and A1 with A1-ctrl and A5. For these we use McNemar's test for paired Recall@1 outcomes and a paired bootstrap (10{,}000 resamples) for confidence intervals on the $\Delta$ terms, $S_{\text{swap}}$, the trap effect, Cold@1 and Trap@1. The raw baseline--A1 gap compares different instances, so it gets an unpaired bootstrap. Because Recall@1 base rates are low (roughly 0.02--0.15), we fix the number of test instances per domain with a power analysis before running the full grid. The cross-domain claim is tested with a logistic regression of per-instance success on \emph{domain} $\times$ \emph{condition}; a significant interaction indicates that recency sensitivity differs between news and video games.
+
+% ============================================================
+\section{Experimental Setup}
+
+\paragraph{Rerankers.}\label{sec:models} We use five open models released in 2023 (Table~\ref{tab:models}): Phi-2 \citep{javaheripi2023phi2}, Llama~2 at 7B and 13B \citep{touvron2023llama2}, Mistral 7B \citep{jiang2023mistral} and Qwen-7B \citep{bai2023qwen}. They were selected so that (i) all were released before both datasets, (ii) each has an instruction-tuned release suitable for listwise prompting, except Phi-2, a base model documented to handle question-answer and chat-style prompts, (iii) together they span 2.7B to 13B parameters, with Llama~2 at two sizes for a within-family scale comparison, and (iv) each can run on a single GPU under our Low-QoS allocation on the ADA cluster, using 4-bit quantization where needed. We exclude models that are too large to run (Mixtral 8x7B), lack a usable instruction-tuned release (LLaMA, Pythia), or are dominated by a stronger model of the same size (Falcon, MPT, OpenAssistant, DeepSeek LLM). Smaller models may fail to follow the output format, especially under Structural Reasoning, so we report the parse-failure rate for every model and method.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabularx}{\columnwidth}{@{}X r l@{}}
+\toprule
+\textbf{Model} & \textbf{Params} & \textbf{Released} \\
+\midrule
+Phi-2 & 2.7B & Dec 2023 \\
+Llama-2-7B-Chat & 7B & Jul 2023 \\
+Llama-2-13B-Chat & 13B & Jul 2023 \\
+Mistral-7B-Instruct & 7.3B & Sep 2023 \\
+Qwen-7B-Chat & 7B & Sep 2023 \\
+\bottomrule
+\end{tabularx}
+\caption{Rerankers. All were released before EB-NeRD (2024) and Amazon Reviews 2023 (2024).}
+\label{tab:models}
+\end{table}
+
+\paragraph{Non-LLM baselines.} Random ($\text{Recall@1} = 0.02$); \emph{random-among-newest}, which picks uniformly among the 10 newest candidates ($0.10$ on the baseline pool); \emph{newest-first}, which sorts by $t_0$ and can exceed $0.10$ when the target tends to be the newest candidate; the warm-start ranker; popularity; content similarity (embedding cosine between $H_u$ and $x_c$); and \emph{cold-filter + content}, which keeps only candidates newer than $H_u$ and ranks them by content similarity. The date-only baselines give the reference point for how much of an LLM's score a recency heuristic alone can explain. Cold-filter + content is the strongest non-LLM combination of the date shortcut and content, so an LLM shows semantic value beyond the shortcut only if it beats this baseline.
+
+\paragraph{Context and compute budget.} A listwise prompt holds 50 candidates (title, date and genre) plus a truncated history. Context windows are tight for these models: 4k tokens for Llama~2 and 2k for Phi-2, and Danish text uses more tokens per word than English. We therefore truncate the history to fit each model's window and record the prompt length. Phi-2 cannot hold a 50-candidate listwise prompt together with the reasoning output, so it is evaluated with the pointwise control only, which needs a single candidate per prompt. The reasoning methods produce long outputs and, for Soft Self-Consistency, several of them per prompt. We therefore run Direct-Rec and the pointwise control on every condition, and the reasoning methods on a subsample of instances. Outputs are cached so that shared prompts are not recomputed.
+
+% ============================================================
+% \section{Hypotheses}
+
+% \begin{description}[leftmargin=1.2em]
+%   \item[H1 (Shortcut share).] On the Netflix-style baseline, a large share of the LLM's Recall@1 gain over random is matched by the date-only random-among-newest baseline ($0.10$).
+%   \item[H2 (Recency reliance).] Swapping only the target's displayed date (A2) lowers Recall@1, i.e.\ $\Delta_{\text{recency}} > 0$, and Cold@1 stays far above chance.
+%   \item[H3 (Over-crediting).] Recall@1 falls sharply on the old-gold pool (A1), and Trap@1 rises as more fresh-dated traps are added (A5).
+%   \item[H4 (Domain contrast).] Recency reliance appears in both domains, but relative to $\Delta_{\text{evidence}}$ it is larger in video games, where it is unjustified.
+%   \item[H5 (Scale).] Increasing model size within our range reduces these effects only modestly.
+% \end{description}
+% All five are falsifiable. A near-zero $\Delta_{\text{recency}}$ with a large $\Delta_{\text{evidence}}$ in the static domain would show that LLM cold-start gains are genuinely semantic, which is itself a useful result.
+
+% ============================================================
+\section{Work Plan}\label{sec:plan}
+
+The project is organized into four threads, summarized in Table~\ref{tab:plan}.
+
+
+% ============================================================
+\section*{Limitations}
+
+\begin{itemize}
+  \item \textbf{Model scale and age.} Our models (2.7B--13B, released in 2023) are smaller and older than current production rerankers. They may lean more heavily on shallow cues, so findings may not transfer directly to newer, larger models. We accept this in exchange for models whose training predates both datasets. Their short context windows also limit the listwise setting, and Phi-2 is evaluated pointwise only.
+  \item \textbf{Language.} EB-NeRD articles are in Danish, and 2023 open models were trained mostly on English. If Danish titles prove too hard for the smaller models, we translate titles and subtitles into English once with a fixed translation model, so every condition sees identical text.
+  \item \textbf{Reproduction, not replication.} The Netflix data and production ranker are proprietary. We reproduce the protocol of \citet{li2026llmreasoning} on public data with a stand-in warm ranker, no fine-tuning and much smaller models, so our absolute numbers are not comparable to theirs.
+  \item \textbf{Pretraining exposure.} Our models may have seen items from both datasets during pretraining. As argued in \S\ref{sec:exposure}, this mainly affects absolute accuracy and, if anything, biases our recency estimates downward.
+  \item \textbf{Defining relevance.} A non-clicked item is not necessarily irrelevant. We mitigate this by drawing traps from low-similarity items and reporting manipulation checks.
+  \item \textbf{Implicit recency.} Content may reveal an item's age even with dates hidden (e.g.\ news events, console generations). This recency still counts towards $\Delta_{\text{evidence}}$ under Hide, which is why we treat $\Delta_{\text{evidence}}$ as an upper bound on semantic evidence.
+  \item \textbf{Age proxy.} For Amazon items without a listed \emph{Date First Available}, the first review time only approximates the true release date.
+\end{itemize}
+
+% ============================================================
+\bibliography{custom}
+
+\end{document}
