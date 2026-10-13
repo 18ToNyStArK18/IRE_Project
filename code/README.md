@@ -17,6 +17,7 @@ to `../outputs/` (both git-ignored). Set `COLDRANK_DATA` / `COLDRANK_OUT` to mov
 | 3. Split | `python -m coldrank.data.split` | CPU | `data/processed/amazon_vg/split_T…/{cold,old}_{dev,test}.jsonl` |
 | 4. SASRec | `python -m coldrank.warm.sasrec` | CPU or GPU | `split_T…/sasrec_topk.jsonl`, `sasrec_report.json` |
 | 5. Pools | `python -m coldrank.pools.build` | CPU | `split_T…/pools/baseline_{random,hard}_{dev,test}.jsonl` |
+| 5b. Adversarial pools | `python -m coldrank.adversarial.build` | CPU | `split_T…/pools/<condition>_<neg>_<split>.jsonl`, `variant_stats.json` |
 | 6. Heuristics | `python -m coldrank.baselines.heuristics --split dev` | CPU | `outputs/amazon_vg/baseline/<neg>/heuristic/<name>/<split>/preds.jsonl` |
 | 7. LLM runs | `python -m coldrank.llm.run --model M --method X --split dev --neg random` | GPU (ADA) | `outputs/amazon_vg/baseline/<neg>/<M>/<X>/<split>/{raw,preds}.jsonl` |
 | 8. Report | `python -m coldrank.eval.report --split dev` | CPU | `outputs/amazon_vg/baseline/report_dev/summary.md` |
@@ -28,6 +29,9 @@ base=https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/resolve/mai
 curl -L -C - -O $base/meta_categories/meta_Video_Games.jsonl
 curl -L -C - -O $base/review_categories/Video_Games.jsonl
 ```
+
+Variants: `--condition a2_swap|a3_hide|a4_shuffle|a6_allcold` (with `--neg random|hard`) and
+`a1_oldgold|a1ctrl|a5_n1|a5_n2|a5_n5|a5_n10` (with `--neg trap`). See the project README for details.
 
 Models (`configs/models.yaml`): `phi2` (pointwise only), `llama2_7b`, `llama2_13b`,
 `mistral_7b`, `qwen_7b`. Methods: `direct`, `base`, `fast`, `structural`,

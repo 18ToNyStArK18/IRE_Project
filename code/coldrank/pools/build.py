@@ -87,6 +87,39 @@ def candidate_record(
     }
 
 
+def cold_catalogue(items: pd.DataFrame, T: int) -> tuple[np.ndarray, np.ndarray]:
+    """Cold items (t0 > T) sorted by launch time: (item_ids, t0s)."""
+    t0 = items.set_index("item_id")["t0"].astype("int64")
+    cold_ids = t0[t0 > T].sort_values(kind="mergesort")  # ascending launch time
+    return cold_ids.index.to_numpy(), cold_ids.to_numpy()
+
+
+def eligible_cold(
+    r: dict, gold: str, excl: set, cold_index: np.ndarray, cold_t0: np.ndarray, emb: "Embeddings", dup_thr: float
+) -> tuple[list[str], int | None]:
+    """Cold items usable as negatives for instance r: launched in (T, target_ts], not in
+    `excl`, and not a near-duplicate of the gold (cosine >= dup_thr). Returns the list
+    (in launch-time order) and the number of near-duplicates removed (None if no items)."""
+    hi = np.searchsorted(cold_t0, r["target_ts"], side="right")
+    elig = [i for i in cold_index[:hi] if i not in excl]
+    if not elig:
+        return elig, None
+    sim_gold = emb[elig] @ emb[[gold]][0]
+    keep = sim_gold < dup_thr
+    return [i for i, k in zip(elig, keep) if k], int((~keep).sum())
+
+
+def history_records(r: dict, it: pd.DataFrame) -> list[dict]:
+    """Displayed history records for an instance (dates = item launch dates)."""
+    out = []
+    for h_item, h_ts in r["history"]:
+        h = it.loc[h_item]
+        out.append({"item_id": h_item, "title": h["title"], "date": ts_to_date(int(h["t0"])),
+                    "t0": int(h["t0"]), "category": h["category_path"], "brand": h["brand"],
+                    "ts": int(h_ts)})
+    return out
+
+
 def build_pools(
     instances: list[dict],
     topk: dict[str, list[str]],
@@ -101,10 +134,7 @@ def build_pools(
     dup_thr = pc["dup_threshold"]
     prof_len = pc["profile_len"]
     it = items.set_index("item_id")
-    t0 = it["t0"].astype("int64")
-    cold_ids = t0[t0 > T].sort_values(kind="mergesort")  # ascending launch time
-    cold_index = cold_ids.index.to_numpy()
-    cold_t0 = cold_ids.to_numpy()
+    cold_index, cold_t0 = cold_catalogue(items, T)
 
     pools, dropped = [], {"too_few_warm": 0, "too_few_cold": 0}
     dup_removed = []
@@ -117,13 +147,9 @@ def build_pools(
             dropped["too_few_warm"] += 1
             continue
         # cold negatives: launched in (T, target_ts], not the user's, not near-duplicates of gold
-        hi = np.searchsorted(cold_t0, r["target_ts"], side="right")
-        elig = [i for i in cold_index[:hi] if i not in excl]
-        if elig:
-            sim_gold = emb[elig] @ emb[[gold]][0]
-            keep = sim_gold < dup_thr
-            dup_removed.append(int((~keep).sum()))
-            elig = [i for i, k in zip(elig, keep) if k]
+        elig, n_dup = eligible_cold(r, gold, excl, cold_index, cold_t0, emb, dup_thr)
+        if n_dup is not None:
+            dup_removed.append(n_dup)
         if len(elig) < n_neg:
             dropped["too_few_cold"] += 1
             continue
@@ -146,12 +172,7 @@ def build_pools(
                 for k, (c, s) in enumerate(zip(cands, sims))
             ]
             cand_recs.sort(key=lambda c: c["item_id"])  # neutral order; shuffled at prompt time
-            hist_recs = []
-            for h_item, h_ts in r["history"]:
-                h = it.loc[h_item]
-                hist_recs.append({"item_id": h_item, "title": h["title"], "date": ts_to_date(int(h["t0"])),
-                                  "t0": int(h["t0"]), "category": h["category_path"], "brand": h["brand"],
-                                  "ts": int(h_ts)})
+            hist_recs = history_records(r, it)
             pools.append({
                 "pool_id": f"{r['instance_id']}__{setting}",
                 "instance_id": r["instance_id"],

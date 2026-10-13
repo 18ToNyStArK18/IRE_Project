@@ -176,3 +176,24 @@ Every choice made while implementing `code/`, with the reason. Values live in `c
   - SASRec and popularity: 0 / 0 (they cannot rank cold items).
 - **Hard negatives are adversarial to content matching**, not just harder: they are the cold items most similar to the history (mean similarity 0.73 against 0.54 for the gold), so any similarity-based ranker almost never ranks the gold first. Read hard-negative results as a stress test.
 - **Local environment note:** model loading can hang on a stalled Hugging Face CDN connection even when the files are cached; set `HF_HUB_OFFLINE=1` once models are downloaded.
+
+### Adversarial variants (`code/coldrank/adversarial/`, plan_adversarial.md)
+- **Separate package** (team request), so the baseline code stays as it was. The shared eligibility logic was extracted from `pools/build.py` into `eligible_cold()`, `cold_catalogue()` and `history_records()`. Regenerating all 1,900 baseline pools in memory gave **byte-identical** output.
+- **Order matching:** variant pools keep their reference's candidate order slot by slot and carry `shuffle_key` = the reference pool ID. The renderer seeds the shuffle with it, so every shared candidate appears in the same prompt position; a date variant changes only dates. Baseline pools have no key, so in-flight baseline runs are unaffected.
+- **Embeddings:** baseline vectors are reused unchanged; only items missing for the old-target instances are encoded, into `item_embeddings_adv.npz`. The baseline cache is never rewritten, since re-encoding in different batches can shift vectors slightly and change hard-negative order.
+- **A2:** partner = a uniformly random warm candidate, seeded by pool, so random and hard pools of the same instance may get different partners.
+- **A6:** the baseline's eligibility rules; 49 negatives (random / hard); 1 test instance dropped.
+- **A1:**
+  - gold = the old target (warm, not in `H_u`), inserted (SASRec ranks it in its top 40 only 4.8% of the time); its true SASRec rank is kept in `warm_rank`;
+  - warm slots = SASRec top 39 excluding the gold, `H_u` and the user's window items;
+  - traps = 10 random items among the eligible new items at or below the 25th percentile of similarity to the user profile, which must also *display* a date after the cutoff (an item launched later on the cutoff day shows the cutoff date and would not look new);
+  - 39 of 1,150 instances dropped.
+- **A1-ctrl:** trap slots refilled, in slot order, by SASRec ranks 40–49.
+- **A5:** the *n* warm negatives with the lowest similarity are relabeled (nested in *n*); each new date is copied from a random eligible new item that displays a date after the cutoff, seeded per (instance, item).
+- **Metrics:** Cold@1 uses `new_dated` (what the model sees) when present, otherwise the true cold flag (baseline). Trap@1 counts `trap`/`relabeled` roles, or `ctrl_fill` on A1-ctrl.
+- **Manipulation checks (test):**
+  - trap similarity 0.30 vs gold 0.52; traps a median 706 days newer than the gold;
+  - A1-ctrl fill similarity 0.535 vs warm 0.544;
+  - A5 relabeled similarity 0.32 (n = 1) to 0.42 (n = 10);
+  - A2 moves the gold's displayed date back a median of about 1,150 days.
+- **Finding:** in A1-ctrl, newest-first reaches Recall@1 = 0.41. Among older items, the one bought next tends to be the most recently launched, so recency is informative even within the warm items. A1-ctrl is therefore not recency-neutral; this must be stated when reporting the trap effect.

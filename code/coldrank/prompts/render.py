@@ -177,8 +177,11 @@ class Rendered:
 
 
 def shuffled_candidates(pool: dict, shuffle: int) -> list[dict]:
+    """Candidates in the order of one shuffle. Seeded by `shuffle_key` when present
+    (variant pools point it at their reference pool), so a variant keeps every shared
+    candidate in the same prompt position; baseline pools have no key and use pool_id."""
     cands = list(pool["candidates"])
-    rng_for("shuffle", pool["pool_id"], shuffle).shuffle(cands)
+    rng_for("shuffle", pool.get("shuffle_key", pool["pool_id"]), shuffle).shuffle(cands)
     return cands
 
 

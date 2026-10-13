@@ -83,3 +83,14 @@ def ts_to_date(ts: int | float) -> str:
 def date_to_ts(d: str) -> int:
     """'YYYY-MM-DD' -> Unix seconds at 00:00 UTC."""
     return int(datetime.strptime(d, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp())
+
+
+def pool_files(pool_dir: str | Path, condition: str, split: str) -> dict[str, Path]:
+    """{neg_setting: path} for every pool file `<condition>_<neg>_<split>.jsonl`.
+    Baseline / A2-A4 / A6 have `random` and `hard`; the A1 family has `trap`."""
+    out = {}
+    for f in sorted(Path(pool_dir).glob(f"{condition}_*_{split}.jsonl")):
+        neg = f.name[len(condition) + 1 : -len(f"_{split}.jsonl")]
+        if neg and "_" not in neg:  # guards against prefix clashes, e.g. a5_n1 vs a5_n10
+            out[neg] = f
+    return out

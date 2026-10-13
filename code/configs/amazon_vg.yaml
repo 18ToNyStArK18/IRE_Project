@@ -38,3 +38,12 @@ prompt:
   history_len: {direct: 20, base: 20, fast: 40, structural: 20, ssc: 20, pointwise: 20}
   top_n: 10              # listwise output length
   shuffles: 3
+
+# --- adversarial variants (coldrank.adversarial; plan_adversarial.md) ---
+adversarial:
+  a6_n_negs: 49          # A6: gold + 49 cold negatives
+  a1_n_warm: 39          # A1: gold + 39 SASRec warm items ...
+  a1_n_traps: 10         # ... + 10 traps
+  trap_quantile: 0.25    # traps: similarity to the user profile <= this quantile of the eligible new items
+  ctrl_fill: 10          # A1-ctrl: trap slots refilled with SASRec warm ranks 40-49
+  flood_ns: [1, 2, 5, 10]  # A5: number of warm negatives relabeled with new dates

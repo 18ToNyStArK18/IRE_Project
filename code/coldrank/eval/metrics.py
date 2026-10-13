@@ -6,6 +6,10 @@ Conventions (design.md):
   * Recall@1 / NDCG@10 are computed over ALL pools; an empty ranking scores 0.
   * Cold@1 is computed over pools with a non-empty ranking (it describes what the
     model picks when it does pick); the parse-failure rate is reported beside it.
+    It counts items that LOOK new (`new_dated`, set on variant pools) and falls back
+    to the true cold flag for baseline pools.
+  * Trap@1 (A1, A5): the top item is a trap or a relabeled warm item; on A1-ctrl,
+    the top item is one of the items filling the trap slots. None elsewhere.
   * Ties are broken by a stable hash of (pool_id, item_id): pseudo-random but
     reproducible, and independent of stored candidate order.
 """
@@ -16,6 +20,9 @@ import math
 from collections import defaultdict
 
 from coldrank.common import stable_hash
+
+
+TRAP_ROLES = {"trap", "relabeled"}
 
 
 def tie_key(pool_id: str, item_id: str) -> str:
@@ -40,7 +47,14 @@ def sort_by_score(pool_id: str, scores: dict[str, float]) -> list[str]:
 
 def pool_metrics(pool: dict, ranking: list[str], k: int = 10) -> dict:
     gold = pool["gold_item_id"]
-    cold = {c["item_id"] for c in pool["candidates"] if c["is_cold"]}
+    cands = pool["candidates"]
+    if any("new_dated" in c for c in cands):
+        new = {c["item_id"] for c in cands if c["new_dated"]}
+    else:
+        new = {c["item_id"] for c in cands if c["is_cold"]}
+    roles = {c["item_id"]: c.get("role") for c in cands}
+    trap_roles = TRAP_ROLES if set(roles.values()) & TRAP_ROLES else (
+        {"ctrl_fill"} if "ctrl_fill" in roles.values() else None)
     rank = ranking.index(gold) + 1 if gold in ranking else None
     return {
         "pool_id": pool["pool_id"],
@@ -48,17 +62,20 @@ def pool_metrics(pool: dict, ranking: list[str], k: int = 10) -> dict:
         "recall1": float(rank == 1),
         "ndcg10": 1.0 / math.log2(rank + 1) if rank is not None and rank <= k else 0.0,
         "empty": not ranking,
-        "cold1": (ranking[0] in cold) if ranking else None,
+        "cold1": (ranking[0] in new) if ranking else None,
+        "trap1": (roles[ranking[0]] in trap_roles) if ranking and trap_roles else None,
     }
 
 
 def summarize(rows: list[dict]) -> dict:
     n = len(rows)
     nonempty = [r for r in rows if not r["empty"]]
+    withtrap = [r for r in nonempty if r.get("trap1") is not None]
     return {
         "n": n,
         "recall1": sum(r["recall1"] for r in rows) / n if n else float("nan"),
         "ndcg10": sum(r["ndcg10"] for r in rows) / n if n else float("nan"),
         "cold1": sum(r["cold1"] for r in nonempty) / len(nonempty) if nonempty else float("nan"),
+        "trap1": (sum(r["trap1"] for r in withtrap) / len(withtrap)) if withtrap else float("nan"),
         "empty_rate": 1 - len(nonempty) / n if n else float("nan"),
     }

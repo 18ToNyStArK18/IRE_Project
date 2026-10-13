@@ -18,6 +18,7 @@ Every design choice and its reason is logged in `design.md` (§11 covers the imp
 | 5. Inference engine | ✅ Implemented (vLLM + HF fallback, cache, Borda). ⏳ Not yet run on the GPU |
 | 6. Reference heuristics + evaluation | ✅ Done. Heuristic results on test (report Table 4) |
 | — LLM runs on ADA | ⏳ Next: vLLM smoke test on the 2080 Ti, then dev runs |
+| Adversarial variants + decomposition | ⏳ Next: see [`plan_adversarial.md`](plan_adversarial.md) |
 | 7. EB-NeRD port | ⏳ Not started |
 | 8. QLoRA SFT (stretch) | ⏳ Not started |
 

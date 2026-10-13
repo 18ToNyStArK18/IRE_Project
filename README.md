@@ -19,7 +19,8 @@ The domains are Amazon Video Games (static catalogue, where recency should not m
 | Path | What it is |
 |---|---|
 | [`report/`](report/) | LaTeX write-up; [`report/Report.pdf`](report/Report.pdf) is the current version |
-| [`plan.md`](plan.md) | Implementation plan, with done / pending status per phase |
+| [`plan.md`](plan.md) | Implementation plan for the baseline, with done / pending status per phase |
+| [`plan_adversarial.md`](plan_adversarial.md) | Plan for the adversarial variants (A1–A6) and the decomposition (Threads 2–3) |
 | [`design.md`](design.md) | Every design decision with its reason (§11 is the implementation log) |
 | [`code/`](code/) | The `coldrank` pipeline: split, warm ranker, pools, prompts, LLM inference, evaluation, tests. See [`code/README.md`](code/README.md) |
 | [`readings/`](readings/) | Key papers: Li et al. (the baseline), Fang et al. (closest prior work), Dong et al. (decomposition and settings) |
@@ -36,7 +37,9 @@ The domains are Amazon Video Games (static catalogue, where recency should not m
 | LLM inference (vLLM + HF fallback, caching, shuffles) | ✅ Implemented; ⏳ not yet run on the GPU |
 | Non-LLM reference rankers and evaluation | ✅ Done (results below) |
 | LLM runs on ADA (2080 Ti) | ⏳ Next |
-| Adversarial variants A1–A6, EB-NeRD, QLoRA SFT | ⏳ Later |
+| Adversarial variant pools A1–A6 (+ A1-ctrl, A5 × 4) | ✅ Built and checked: 10 conditions, all invariants pass, heuristic sanity table below |
+| LLM runs on the variants, decomposition script (Thread 3) | ⏳ Next |
+| EB-NeRD, QLoRA SFT | ⏳ Later |
 
 ## First results
 
@@ -56,6 +59,56 @@ Recall@1 of non-LLM rankers on the 800 Amazon Video Games test pools. These rank
 - An LLM has to beat 0.32 (random negatives) before its cold-start performance shows anything beyond the date shortcut.
 - No LLM results yet. A local CPU test with a tiny 135M model only checked that the pipeline runs; it says nothing about recency bias.
 
+## Adversarial variants
+
+Each variant changes **one factor** relative to a reference pool, so recency and relevance can be separated (report §3.5). All of the code is in [`code/coldrank/adversarial/`](code/coldrank/adversarial/). The pool files are written next to the baseline ones in `data/processed/amazon_vg/split_T2022-09-01_w180/pools/<condition>_<neg>_<split>.jsonl`.
+
+| Condition | What changes | Reference | Built by | Pools (dev / test) |
+|---|---|---|---|---|
+| `baseline` | 40 warm + gold + 9 cold; true dates | — | `pools/build.py` → `build_pools()` | 150 / 800 per neg |
+| `a2_swap` | Displayed dates of the gold and one random warm item exchanged | baseline | `adversarial/date_variants.py` → `make_a2_swap()` | 150 / 800 per neg |
+| `a3_hide` | No dates on candidates **or** history | baseline | `date_variants.py` → `make_a3_hide()` | 150 / 800 per neg |
+| `a4_shuffle` | Displayed dates permuted across all 50 candidates | baseline | `date_variants.py` → `make_a4_shuffle()` | 150 / 800 per neg |
+| `a6_allcold` | Gold + 49 cold negatives (random / hard); recency no longer separates the gold | baseline instances | `adversarial/allcold.py` → `build_a6()` | 150 / 799 per neg |
+| `a1_oldgold` | Old (warm) gold + 39 SASRec warm items + 10 **traps** (new, low-similarity items) | old-target instances | `adversarial/oldgold.py` → `build_oldgold()` | 144 / 967 |
+| `a1ctrl` | A1 with the 10 trap slots refilled by SASRec warm ranks 40–49 | A1 | `oldgold.py` → `build_oldgold()` | 144 / 967 |
+| `a5_n{1,2,5,10}` | A1 + the *n* least similar warm negatives relabeled with new dates | A1 | `oldgold.py` → `build_oldgold()` | 144 / 967 each |
+
+*neg* = `random` and `hard` for baseline, A2–A4 and A6, and `trap` for the A1 family.
+
+### How it fits together
+
+| File | Function | Role |
+|---|---|---|
+| `adversarial/common.py` | `derive()` | Copies a reference pool as a new condition. It keeps the candidate order slot by slot and sets `shuffle_key` to the reference, so the prompt shuffles put shared candidates in the **same positions**. |
+| | `annotate()` | Sets each candidate's `role` (`gold`, `warm`, `cold_neg`, `trap`, `relabeled`, `ctrl_fill`) and `new_dated` (does its *displayed* date fall after the cutoff?). |
+| | `extended_embeddings()` | Reuses the baseline item embeddings unchanged and encodes only missing items into `item_embeddings_adv.npz`. |
+| `adversarial/checks.py` | `check_date_variant()`, `check_a6()`, `check_a1()`, `check_a1ctrl()`, `check_a5()` | Invariants asserted on **every** pool. Examples: A2 changes exactly two dates; A3 leaves no date anywhere; A4 keeps the same set of dates; A1 traps are new and below the similarity threshold; A1-ctrl has nothing new-dated; A5 relabels exactly the *n* least similar warm items. |
+| | `manipulation_stats()` | Similarity and age statistics per condition, written to `pools/variant_stats.json`. |
+| `adversarial/build.py` | `main()` | Builds everything, runs the checks and writes the files: `python -m coldrank.adversarial.build` (or `--only a2_swap,a3_hide`). |
+| `pools/build.py` | `eligible_cold()`, `cold_catalogue()`, `history_records()` | Eligibility rules shared with the baseline: a new negative must have launched between the cutoff and the purchase, must not be one of the user's items and must not be a near-duplicate of the gold. Extracted unchanged; the baseline pools regenerate byte-identical. |
+| `prompts/render.py` | `shuffled_candidates()` | Shuffles by `shuffle_key` when present. Baseline pools have no key, so baseline prompts are unchanged. |
+| `eval/metrics.py` | `pool_metrics()` | **Cold@1** counts items that *look* new (`new_dated`). **Trap@1** = the top item is a trap or relabeled item (on A1-ctrl: a fill item). |
+
+Settings are in `code/configs/amazon_vg.yaml` under `adversarial:`. Unit tests are in `code/tests/test_adversarial.py`.
+
+### Sanity check: non-LLM rankers on each variant (test, Recall@1)
+
+| Condition | Random | Random among 10 newest | Newest first | Text similarity | 10 newest + text |
+|---|---|---|---|---|---|
+| baseline (random neg.) | 0.029 | 0.111 | 0.095 | 0.041 | 0.324 |
+| A2 swap | 0.024 | **0.000** | **0.000** | 0.041 | **0.000** |
+| A3 hide | 0.022 | 0.022 | 0.022 | 0.041 | 0.041 |
+| A4 shuffle | 0.024 | 0.031 | 0.021 | 0.041 | 0.028 |
+| A6 all-cold | 0.026 | 0.018 | 0.040 | 0.110 | 0.061 |
+| A1 old-gold | 0.022 | 0.000 | 0.000 (picks a trap 100%) | 0.039 | 0.000 |
+| A1-ctrl | 0.018 | 0.068 | **0.413** | 0.033 | 0.068 |
+| A5 (any n) | ≈ 0.02 | 0.000 | 0.000 (picks a trap 100%) | 0.039 | 0.000 |
+
+- Date-based rankers collapse exactly where the dates stop pointing at the gold (A2, A3, A4, A6, A1, A5), and text similarity is unaffected by date-only changes. This confirms the variants are built correctly.
+- **Manipulation checks:** traps are much less similar to the user than the gold (0.30 vs 0.52) and about 2 years newer (median 706 days).
+- **Finding (A1-ctrl):** among *older* items too, the item a user buys next tends to be the most recently launched one; newest-first gets it right 41% of the time. Recency therefore points to the gold even within the warm items, and the trap effect (A1-ctrl − A1) includes this.
+
 ## Getting started
 
 ```bash
@@ -71,6 +124,8 @@ python -m coldrank.warm.sasrec
 python -m coldrank.pools.build
 python -m coldrank.baselines.heuristics --split test
 python -m coldrank.eval.report --split test
+python -m coldrank.adversarial.build      # all variant pools (CPU, a few minutes)
+python -m coldrank.baselines.heuristics --condition a2_swap --split test
 
 # 3. LLM runs (GPU)
 python -m coldrank.llm.run --model llama2_7b --method direct --split dev --neg random
@@ -86,7 +141,7 @@ Things to know:
 
 ## Next steps
 
-1. **vLLM smoke test on ADA:** `--model llama2_7b --method direct --split dev --limit 2`.
-2. **Dev runs:** every model × method on the 150 dev instances. Fix prompts on dev only, then freeze them.
-3. **Test runs:** produce the baseline table with LLM rows.
-4. **Adversarial variants (Thread 2):** build them from the existing pool files.
+1. **Baseline LLM runs** (in progress): dev, then test, once prompts are frozen.
+2. **LLM runs on the variants:** Direct-Rec and pointwise on all conditions; the reasoning methods on A1, A1-ctrl, A2 and A3. Use `--condition <name>` and `--neg trap` for the A1 family.
+3. **Decomposition (Thread 3):** `eval/decompose.py` computes ∆evidence, ∆recency, swap sensitivity, trap effect and flood slope with paired statistics.
+4. **EB-NeRD:** port the split, pools and variants.

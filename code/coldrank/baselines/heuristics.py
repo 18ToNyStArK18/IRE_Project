@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 
-from coldrank.common import OUT_DIR, date_to_ts, load_config, read_jsonl, write_jsonl
+from coldrank.common import OUT_DIR, date_to_ts, load_config, pool_files, read_jsonl, write_jsonl
 from coldrank.data.split import split_dir
 from coldrank.eval.metrics import sort_by_score, tie_key
 
@@ -84,9 +84,11 @@ def main() -> None:
     ap.add_argument("--condition", default="baseline")
     args = ap.parse_args()
     cfg = load_config(args.config)
-    pool_dir = split_dir(cfg) / "pools"
-    for neg in cfg["pool"]["neg_settings"]:
-        pools = list(read_jsonl(pool_dir / f"{args.condition}_{neg}_{args.split}.jsonl"))
+    files = pool_files(split_dir(cfg) / "pools", args.condition, args.split)
+    if not files:
+        raise SystemExit(f"no pool files for condition={args.condition} split={args.split}")
+    for neg, path in files.items():
+        pools = list(read_jsonl(path))
         for name, fn in HEURISTICS.items():
             preds = [{"pool_id": p["pool_id"], "ranking": fn(p)} for p in pools]
             out = OUT_DIR / cfg["dataset"] / args.condition / neg / "heuristic" / name / args.split / "preds.jsonl"
