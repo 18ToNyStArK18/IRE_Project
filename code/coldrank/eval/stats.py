@@ -34,6 +34,28 @@ def unpaired_bootstrap_diff(a, b, n_boot: int = 10_000, alpha: float = 0.05, see
             "hi": float(np.quantile(d, 1 - alpha / 2))}
 
 
+def ols_slope(x, y) -> float:
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    xc = x - x.mean()
+    return float((xc * (y - y.mean())).sum() / (xc ** 2).sum())
+
+
+def bootstrap_slope(Y, x, n_boot: int = 10_000, alpha: float = 0.05, seed: int = 0) -> dict:
+    """Slope of the per-level mean of Y on x, with a CI from resampling instances.
+
+    Y: (n_instances, n_levels) outcomes of the SAME instances at each level x[j]
+    (e.g. Recall@1 at n = 0, 1, 2, 5, 10 fresh-dated traps)."""
+    Y, x = np.asarray(Y, float), np.asarray(x, float)
+    assert Y.ndim == 2 and Y.shape[1] == len(x), "Y must be instances x levels"
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, len(Y), size=(n_boot, len(Y)))
+    means = Y[idx].mean(1)                       # (n_boot, n_levels)
+    xc = x - x.mean()
+    slopes = (means - means.mean(1, keepdims=True)) @ xc / (xc ** 2).sum()
+    return {"slope": ols_slope(x, Y.mean(0)), "lo": float(np.quantile(slopes, alpha / 2)),
+            "hi": float(np.quantile(slopes, 1 - alpha / 2))}
+
+
 def mcnemar_exact(a, b) -> dict:
     """Exact McNemar test on paired binary outcomes."""
     a, b = np.asarray(a).astype(bool), np.asarray(b).astype(bool)

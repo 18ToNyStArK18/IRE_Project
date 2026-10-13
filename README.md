@@ -38,7 +38,8 @@ The domains are Amazon Video Games (static catalogue, where recency should not m
 | Non-LLM reference rankers and evaluation | ✅ Done (results below) |
 | LLM runs on ADA (2080 Ti) | ⏳ Next |
 | Adversarial variant pools A1–A6 (+ A1-ctrl, A5 × 4) | ✅ Built and checked: 10 conditions, all invariants pass, heuristic sanity table below |
-| LLM runs on the variants, decomposition script (Thread 3) | ⏳ Next |
+| Decomposition script (Thread 3) | ✅ `code/coldrank/eval/decompose.py`, validated on the heuristics |
+| LLM runs on the variants | ⏳ Next |
 | EB-NeRD, QLoRA SFT | ⏳ Later |
 
 ## First results
@@ -139,9 +140,25 @@ Things to know:
 - Set `HF_HUB_OFFLINE=1` once models are downloaded. Model loading can otherwise hang on a stalled Hugging Face connection.
 - On the dev machine, `USE_TF=0` is already set inside the package; it avoids a TensorFlow/Keras clash with `transformers`.
 
+## Decomposition (Thread 3)
+
+`python -m coldrank.eval.decompose --split test` reads every `preds.jsonl` (LLMs and heuristics) and writes `outputs/amazon_vg/decomposition_test/{rates.csv, decomposition.csv, summary.md}`. It is implemented in `code/coldrank/eval/decompose.py`: `load_outcomes()` → `decompose()` → `summary_md()`; the statistics are in `code/coldrank/eval/stats.py`.
+
+| Quantity | Definition | Test |
+|---|---|---|
+| ∆evidence | R_hide − 1/50 | Bootstrap CI |
+| ∆recency | R_true − R_hide | Paired bootstrap + McNemar |
+| Swap sensitivity | R_true − R_swap | Paired |
+| Shuffle / all-cold effect | R_true − R_shuffle, R_true − R_allcold | Paired |
+| Trap effect | R_A1-ctrl − R_A1 | Paired |
+| Flood slope | Slope of Recall@1 over n = 0 (A1), 1, 2, 5, 10 | Bootstrap over instances |
+| Flood lift | How much more often a relabeled item is ranked first once it looks new (0 for date-blind rankers) | Paired |
+| Over-crediting gap | R_baseline − R_A1 | Unpaired (different instances) |
+
+Validation on the heuristics (test, random negatives): text similarity, which never reads dates, has ∆recency = 0. "10 newest + text" has ∆recency = +0.282 and swap sensitivity = +0.324 (both p < 0.05).
+
 ## Next steps
 
 1. **Baseline LLM runs** (in progress): dev, then test, once prompts are frozen.
-2. **LLM runs on the variants:** Direct-Rec and pointwise on all conditions; the reasoning methods on A1, A1-ctrl, A2 and A3. Use `--condition <name>` and `--neg trap` for the A1 family.
-3. **Decomposition (Thread 3):** `eval/decompose.py` computes ∆evidence, ∆recency, swap sensitivity, trap effect and flood slope with paired statistics.
-4. **EB-NeRD:** port the split, pools and variants.
+2. **LLM runs on the variants:** Direct-Rec and pointwise on all conditions; the reasoning methods on A1, A1-ctrl, A2 and A3. Use `--condition <name>`, and `--neg trap` for the A1 family. Then run `python -m coldrank.eval.decompose`.
+3. **Remaining code:** the exposure check (known/unknown items), the position-effect analysis, and the EB-NeRD port.

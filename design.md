@@ -197,3 +197,27 @@ Every choice made while implementing `code/`, with the reason. Values live in `c
   - A5 relabeled similarity 0.32 (n = 1) to 0.42 (n = 10);
   - A2 moves the gold's displayed date back a median of about 1,150 days.
 - **Finding:** in A1-ctrl, newest-first reaches Recall@1 = 0.41. Among older items, the one bought next tends to be the most recently launched, so recency is informative even within the warm items. A1-ctrl is therefore not recency-neutral; this must be stated when reporting the trap effect.
+
+### Decomposition and statistics (`code/coldrank/eval/decompose.py`, Thread 3)
+- **Input:** per-instance outcomes (Recall@1, Cold@1, Trap@1, top-1 item) for every condition, model and method with a `preds.jsonl`. As in `eval/report.py`, a pool without predictions counts as an empty ranking (Recall@1 = 0). A quantity is skipped when one of its conditions has no predictions.
+- **R_random = 1/50**, the analytic chance level for 50 candidates, rather than the empirical random heuristic (which only adds noise).
+- **Pairing:** every comparison between conditions built from the same instances is paired on `instance_id`.
+  - ∆recency (baseline − A3), swap sensitivity (baseline − A2), shuffle effect (baseline − A4), all-cold effect (baseline − A6, on the 799 shared instances) and trap effect (A1-ctrl − A1).
+  - Each gets a paired bootstrap CI (10,000 resamples, seed 0) and an exact McNemar test.
+- **∆evidence = R_hide − 1/50**, with the CI of R_hide shifted by 1/50. The code asserts that baseline and A3 cover the same instances, which is the condition for ∆evidence + ∆recency = R_true − 1/50 to hold exactly.
+- **Raw over-crediting gap R_baseline − R_A1** uses an **unpaired** bootstrap (different instance sets), for both the random and hard baselines.
+- **Flood slope:** OLS slope of the mean Recall@1 over n ∈ {0 (= A1), 1, 2, 5, 10}, on instances present at every level. The CI resamples instances with the same draw across all levels (`stats.bootstrap_slope`).
+- **Trap@1 flood slope is descriptive only.** Relabeling turns warm items into "fresh-dated" items, so a ranker that ignores dates gets a positive Trap@1 slope whenever it already liked one of them. Measured on the heuristics: random +0.022 per relabeled item (the mechanical 1/50), SASRec +0.021, popularity +0.046.
+- **New primary flood measure, `flood_lift_n`:** P(top-1 is one of the n relabeled items | A5_n) − P(top-1 is one of the *same* items | A1), paired with McNemar. It is exactly 0 for any ranker that ignores dates. Verified: text similarity, popularity and SASRec give 0.000; random gives −0.023 (not significant, because the hash tie-break differs between pool IDs); date-driven heuristics give +0.50 to +0.95.
+- **Validated on the heuristic outputs (test):**
+  - text similarity (date-blind): ∆recency = 0, swap sensitivity = 0;
+  - random: no significant effect;
+  - "10 newest + text": ∆recency +0.282, swap sensitivity +0.324, both p < 0.05.
+- **Not built yet:** the domain × condition logistic regression (needs EB-NeRD).
+- **Outputs:** `outputs/<dataset>/decomposition_<split>/{rates.csv, decomposition.csv, summary.md}`.
+- **Tests:** `code/tests/test_decompose.py` covers:
+  - a recency-driven model (the terms add up) and a relevance-driven one (zero recency effect, p = 1);
+  - trap effect and flood slopes recovered exactly;
+  - flood lift = 0 for a date-blind model;
+  - skipping missing conditions;
+  - the instance-set assertion.

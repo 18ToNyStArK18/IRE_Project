@@ -10,7 +10,7 @@ Context: `report/Report.pdf` §3.5–3.9 (variants, position controls, metrics, 
 | Heuristic sanity table | ✅ Matches expectations except A1-ctrl (finding, see §3) |
 | `--conditions` for multi-condition jobs | ⏳ Not done (cluster convenience) |
 | LLM runs on variants | ⏳ Next |
-| `eval/decompose.py` (Thread 3) | ⏳ Next |
+| `eval/decompose.py` (Thread 3) | ✅ Done and validated on the heuristic outputs (`outputs/amazon_vg/decomposition_test/`). Domain × condition regression waits for EB-NeRD |
 
 **Built counts:** A2/A3/A4 1,900 pools each; A6 1,898 (1 instance dropped); A1 family 1,111 pools per condition (39 of 1,150 old instances dropped: too few low-similarity traps).
 
@@ -177,7 +177,9 @@ Computed per model × method × negative setting by `eval/decompose.py`. `R` is 
 | All-cold effect | R_true − R_allcold | Paired (799 instances) |
 | Trap effect | R_A1-ctrl − R_A1 | Paired (A1 instances) |
 | Raw over-crediting gap | R_baseline − R_A1 | **Unpaired** bootstrap (different instances) |
-| Flood slope | Slope of Recall@1 (and Trap@1) on n ∈ {0, 1, 2, 5, 10}, with n = 0 = A1 | Bootstrap CI of the slope |
+| Flood slope | Slope of Recall@1 on n ∈ {0, 1, 2, 5, 10}, with n = 0 = A1 | Bootstrap CI of the slope |
+| Flood lift (per n) | P(top-1 ∈ relabeled items \| A5_n) − P(top-1 ∈ same items \| A1); 0 for date-blind rankers | Paired bootstrap + McNemar |
+| Trap@1 slope | Descriptive only: partly mechanical (random ranker = 1/50 per relabeled item) | Bootstrap CI |
 | Cold@1, Trap@1 | Per condition | Bootstrap CI; Cold@1 against chance |
 | Domain × condition | Logistic regression of per-instance success | After EB-NeRD exists |
 

@@ -20,7 +20,8 @@ to `../outputs/` (both git-ignored). Set `COLDRANK_DATA` / `COLDRANK_OUT` to mov
 | 5b. Adversarial pools | `python -m coldrank.adversarial.build` | CPU | `split_T…/pools/<condition>_<neg>_<split>.jsonl`, `variant_stats.json` |
 | 6. Heuristics | `python -m coldrank.baselines.heuristics --split dev` | CPU | `outputs/amazon_vg/baseline/<neg>/heuristic/<name>/<split>/preds.jsonl` |
 | 7. LLM runs | `python -m coldrank.llm.run --model M --method X --split dev --neg random` | GPU (ADA) | `outputs/amazon_vg/baseline/<neg>/<M>/<X>/<split>/{raw,preds}.jsonl` |
-| 8. Report | `python -m coldrank.eval.report --split dev` | CPU | `outputs/amazon_vg/baseline/report_dev/summary.md` |
+| 8. Report | `python -m coldrank.eval.report --split dev [--condition X]` | CPU | `outputs/amazon_vg/<condition>/report_dev/summary.md` |
+| 9. Decomposition | `python -m coldrank.eval.decompose --split test` | CPU | `outputs/amazon_vg/decomposition_test/{rates,decomposition}.csv, summary.md` |
 
 Download (Hugging Face mirror of Amazon Reviews 2023):
 ```bash
