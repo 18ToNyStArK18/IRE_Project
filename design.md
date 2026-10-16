@@ -333,3 +333,8 @@ Evidence: our Mistral runs (dev-direct job 20873, promptcheck job 21054) and the
   - **Pointwise is the only method above chance:** Recall@1 0.167 [0.107, 0.227] random negatives, 0.113 hard (chance 0.067). It ranks the gold first among the 3 new items 49% of the time (chance 33%) and prefers new items (Cold@1 0.33 / 0.47 vs 0.20). It stays far below newest-first (0.347) and newest + text (0.580).
   - **Direct-Rec and the 5 reasoning methods are at chance** (0.013–0.067). Reasoning outputs are usable only 25–48% of the time (placeholder/example copying, no final line). Context no longer overflows at K = 15.
   - **Decision pending:** run pointwise on the K = 15 variants (dev) to decompose; drop listwise/reasoning for this model.
+- **Variants, job 23838** (Llama-2-7B pointwise + Direct-Rec on all K = 15 variants, dev; write-up: `analysis_2026-10-16_k15.md` §10–§11):
+  - **Pointwise:** R_true 0.167 → R_hide 0.060, i.e. **Δrecency +0.107\***, Δevidence ≈ 0 (hard negatives: +0.073\*). Swap sensitivity +0.067\*. Direct date effect ±0.07 log-odds (same as at K = 50).
+  - **Not fooled by low-similarity traps:** trap effect n.s., Trap@1 0.167 < 0.20. Flood lift +0.125\* at n = 10, but Recall@1 drops only 0.146 → 0.118.
+  - **Direct-Rec:** at chance everywhere, no date effect.
+  - **Stage `k15-variants`** in `make_tasks.py`. Reasoning was not run on variants (at chance on the baseline).
