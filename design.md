@@ -285,3 +285,17 @@ Every choice made while implementing `code/`, with the reason. Values live in `c
   3. `direct` and `direct_v2` at **K = 20** (`baseline_k20`: 16 best-SASRec warm items + gold + 3 of the 9 cold negatives, seeded; `scripts/make_k20_pools.py`). This separates the prompt effect from the pool-size effect. At K = 20, random = 0.05 and random-among-newest = 0.25.
   - **Decision rule:** prefer a fix that keeps K = 50 (v2, then sliding window). Use K = 20 only if nothing at 50 works, and report it as a deviation.
 - **Shared task queue** (from job 21054 on): all workers read one `queue.txt` (longest task first) and claim tasks with an atomic `mkdir` (`llm.run --claim-dir`). The static shards of job 20873 left 3 GPUs idle for ~15 min because one GPU drew the four slowest tasks. Unit-tested: each task runs exactly once under concurrent workers.
+
+### Repository hygiene (2026-10-16)
+- **`.gitignore` bug:** the unanchored `data/` rule also matched `code/coldrank/data/`, so the data-loading package (`amazon_vg.py`, `audit.py`, `split.py`) was **never committed**. A teammate had to rewrite it from the tests (`analysis_2026-10-16.md` §2). Rules are now anchored (`/data/`, `/outputs/`); `code/coldrank/data/` must be committed.
+- **ADA scripts are git-ignored** (team decision): `code/scripts/*.sbatch`, `ada_*.sh`, `setup_ada.sh`, `submit.sh`, `progress.sh`, `collect_results.sh`, `make_tasks.py`, `write_manifest.py`. The three that were already committed were untracked with `git rm --cached`; local copies are kept.
+
+### Why the LLM rerankers fail here, and what the literature actually supports (2026-10-16)
+Evidence: our Mistral runs (dev-direct job 20873, promptcheck job 21054) and the teammates' 88 runs (`analysis_2026-10-16.md`).
+- **Only one LLM run beats chance:** Llama-2-7B pointwise, test Recall@1 0.072. **All of its gain is Δrecency** (+0.050*, Δevidence ≈ 0; swap sensitivity +0.044*). Every listwise method, and every other model, is at chance at K = 50.
+- **The sign of the date effect is model-dependent:** Mistral, Qwen and Phi-2 *penalise* post-cutoff dates (Cold@1 below chance; −0.06 to −0.12 log-odds when an item gains a new date).
+- **This is consistent with the published evidence, not a bug in our pipeline:**
+  - Dong et al. (2026), with our exact domain (Amazon Video Games) and stronger 2025 models (Qwen3-8B/32B, Llama-3.3-70B): "Qwen3-8B does not win any domain … a cross-encoder wins Video Games". Scaling "does not rescue most domains"; the exception is MIND news (weak interaction signal, rich text). Pointwise yes/no beats listwise (VideoG Recall@10 .040 vs .020/.020). Their Video Games evidence effect is −0.017.
+  - Li et al.'s Netflix gains come from **Qwen-2.5-32B with SFT/GRPO**, on a catalogue (movies/shows) with rich descriptive metadata, and are **reported only as relative improvements** over their own Fast-Reason baseline. They never show absolute accuracy against a date-only ranker.
+  - Our domain carries little content signal: text similarity alone scores Recall@1 0.041 (random 0.029); histories are short (median 8.5) and stale (median 281 days between the last history item and the target); many targets are hardware or accessories.
+- **Implication:** on Amazon Video Games, zero-shot 2023 7B/13B models do not show the cold-start competence that the recency question presupposes. The one model that "succeeds" does so through the date shortcut. That supports the project's thesis, but it is a narrow base.
