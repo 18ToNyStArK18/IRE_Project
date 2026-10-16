@@ -172,3 +172,25 @@ def test_display_title_and_category():
     assert display_category("Legacy Systems > Nintendo Systems > Wii > Games") == "Wii > Games"
     assert display_category("PlayStation 4 > Accessories > Accessory Kits > Extra") == "PlayStation 4 > Accessories > Accessory Kits"
     assert display_category("") == ""
+
+
+# ---------------- letter codes (prompt.id_style: codes) ---------------- #
+@pytest.mark.parametrize("method", ["direct", "base", "fast", "structural", "structural_norecency", "ssc"])
+def test_codes_render_and_parse(method):
+    from coldrank.prompts.render import CODE_LETTERS, EXAMPLE_CODES
+    pool = make_pool()
+    r = render_listwise(pool, method, 0, 20, 10, id_style="codes")
+    codes = list(r.code_map)
+    assert len(codes) == 50 == len(set(codes)) and sorted(r.code_map.values()) == list(range(1, 51))
+    assert all(len(c) == 2 and set(c) <= set(CODE_LETTERS) for c in codes)         # consonant pairs only
+    assert r == render_listwise(pool, method, 0, 20, 10, id_style="codes")           # deterministic
+    task = r.user.split("Now the actual task.")[-1]
+    assert "[1]" not in task and "[50]" not in task                                  # no numbered IDs
+    assert "FINAL: [code]" in r.user and r.prefill == ""
+    if method in ("base", "fast", "structural", "structural_norecency"):
+        demo = r.user.split("Now the actual task.")[0]
+        assert "[AE]" in demo and not re.search(r"\[\d\]", demo)                     # examples use vowel codes
+    a, b = codes[4], codes[0]
+    assert parse_ranking(f"blah\nFINAL: [{a}] > [{b.lower()}] > [{a}]", 50, r.code_map) == ([5, 1], "final")
+    # copying the worked example's answer (vowel codes) must not parse as a ranking
+    assert parse_ranking("FINAL: [" + "] > [".join(EXAMPLE_CODES) + "]", 50, r.code_map) == ([], "fail")

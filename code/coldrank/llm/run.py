@@ -35,7 +35,8 @@ def run_listwise(engine, family: str, pools: list[dict], method: str, cfg: dict,
     jobs = []
     for p in pools:
         for s in range(pc["shuffles"]):
-            r = render_listwise(p, method, s, hist_len, pc["top_n"], count, max_len)
+            r = render_listwise(p, method, s, hist_len, pc["top_n"], count, max_len,
+                                id_style=pc.get("id_style", "numbers"))
             jobs.append((p, s, r))
     runnable = [j for j in jobs if j[2].max_new_tokens > 0]
     texts = engine.generate(
@@ -48,7 +49,7 @@ def run_listwise(engine, family: str, pools: list[dict], method: str, cfg: dict,
     for p, s, r in jobs:
         text = out_text.get(id(r))
         full = (r.prefill + text) if text is not None else ""
-        ids, mode = parse_ranking(full, len(r.id_map)) if text is not None else ([], "skipped_overflow")
+        ids, mode = parse_ranking(full, len(r.id_map), r.code_map) if text is not None else ([], "skipped_overflow")
         ranking = [r.id_map[i] for i in ids]
         raw.append({
             "pool_id": p["pool_id"], "shuffle": s, "output": full, "parse_mode": mode, "ranking": ranking,
@@ -91,11 +92,12 @@ def run_sliding(engine, family: str, pools: list[dict], cfg: dict, max_len: int,
     for rnd, a in enumerate(starts):
         b = min(a + window, n_c)
         rendered = [render_listwise(st["pool"], "direct_sw", st["shuffle"], hist_len, pc["top_n"], count,
-                                    max_len, cands=st["order"][a:b]) for st in states]
+                                    max_len, cands=st["order"][a:b], id_style=pc.get("id_style", "numbers"))
+                    for st in states]
         texts = engine.generate([format_chat(family, r.system, r.user, r.prefill) for r in rendered],
                                 [r.max_new_tokens for r in rendered])
         for st, r, text in zip(states, rendered, texts):
-            ids, mode = parse_ranking(text, len(r.id_map))
+            ids, mode = parse_ranking(text, len(r.id_map), r.code_map)
             win = st["order"][a:b]
             if ids:
                 st["parsed"] += 1
@@ -201,7 +203,7 @@ def verify_pointwise(engine, family: str, cfg: dict, n: int, tol: float = 0.05) 
     pairs = [(a, b) for a, b in zip(fast, exact) if b == b]  # exact is NaN if Yes/No not in top-20
     print(json.dumps({"verify_pointwise_n": n, "comparable": len(pairs), "fast": fast[:4], "exact": exact[:4]}))
     if len(pairs) < max(1, n // 2):
-        raise SystemExit(f"only {len(pairs)}/{n} prompts had both Yes and No in the top-20: cannot verify")
+        raise SystemExit(f"only {len(pairs)}/{n} prompts had both Yes and No in the top-500: cannot verify")
     diff = max(abs(a - b) for a, b in pairs)
     print(json.dumps({"verify_pointwise_max_abs_diff": diff}))
     if diff > tol:

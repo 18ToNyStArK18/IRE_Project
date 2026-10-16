@@ -50,7 +50,7 @@ from coldrank.eval.stats import (
 )
 
 N_CANDIDATES = 50
-R_RANDOM = 1 / N_CANDIDATES
+R_RANDOM = 1 / N_CANDIDATES  # default chance level; main() passes 1/K for other pool sizes
 COLD_FAMILY = ["baseline", "a3_hide", "a2_swap", "a4_shuffle", "a6_allcold"]
 PAIRED_COLD = [  # (quantity, condition subtracted from baseline)
     ("d_recency", "a3_hide"),
@@ -67,11 +67,14 @@ def conditions(cfg: dict) -> list[str]:
 # --------------------------------------------------------------------------- #
 # Loading
 # --------------------------------------------------------------------------- #
-def load_outcomes(cfg: dict, split: str) -> pd.DataFrame:
-    """One row per (condition, neg, model, method, instance) with recall1 / cold1 / trap1."""
+def load_outcomes(cfg: dict, split: str, prefix: str = "") -> pd.DataFrame:
+    """One row per (condition, neg, model, method, instance) with recall1 / cold1 / trap1.
+    `prefix` selects a pool family, e.g. "k15_" for the 15-candidate pools; the prefix is
+    stripped from the condition names so the decomposition logic is shared."""
     rows = []
     pool_dir = split_dir(cfg) / "pools"
-    for cond in conditions(cfg):
+    for base_cond in conditions(cfg):
+        cond = prefix + base_cond
         for neg, path in pool_files(pool_dir, cond, split).items():
             pools = {p["pool_id"]: p for p in read_jsonl(path)}
             pred_root = OUT_DIR / cfg["dataset"] / cond / neg
@@ -83,7 +86,7 @@ def load_outcomes(cfg: dict, split: str) -> pd.DataFrame:
                     m = pool_metrics(p, ranking)
                     relabeled = tuple(sorted(c["item_id"] for c in p["candidates"] if c.get("role") == "relabeled"))
                     rows.append({
-                        "condition": cond, "neg": neg, "model": model, "method": method,
+                        "condition": base_cond, "neg": neg, "model": model, "method": method,
                         "instance_id": p["instance_id"], "recall1": m["recall1"],
                         "cold1": np.nan if m["cold1"] is None else float(m["cold1"]),
                         "trap1": np.nan if m["trap1"] is None else float(m["trap1"]),
@@ -129,7 +132,7 @@ def rates(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
-def decompose(df: pd.DataFrame, flood_ns: list[int]) -> pd.DataFrame:
+def decompose(df: pd.DataFrame, flood_ns: list[int], r_random: float = R_RANDOM) -> pd.DataFrame:
     rows = []
     for (model, method), g in df.groupby(["model", "method"], sort=True):
         key = {"model": model, "method": method}
@@ -144,8 +147,8 @@ def decompose(df: pd.DataFrame, flood_ns: list[int]) -> pd.DataFrame:
             if ("a3_hide", neg) in have:
                 hide = _series(g, "a3_hide", neg)
                 r, lo, hi = bootstrap_ci(hide.to_numpy())
-                rows.append(dict(k, quantity="d_evidence", value=r - R_RANDOM, lo=lo - R_RANDOM, hi=hi - R_RANDOM,
-                                 p=np.nan, n=len(hide), test="bootstrap CI of R_hide, minus 1/50"))
+                rows.append(dict(k, quantity="d_evidence", value=r - r_random, lo=lo - r_random, hi=hi - r_random,
+                                 p=np.nan, n=len(hide), test=f"bootstrap CI of R_hide, minus 1/{round(1 / r_random)}"))
                 # d_evidence + d_recency = R_true - R_random holds exactly only if both
                 # terms are computed on the same instance set
                 assert set(hide.index) == set(base.index), "baseline and A3 must share instances"
@@ -245,18 +248,21 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="amazon_vg")
     ap.add_argument("--split", default="test")
+    ap.add_argument("--prefix", default="", help='pool family, e.g. "k15_" for 15-candidate pools')
     args = ap.parse_args()
     cfg = load_config(args.config)
-    df = load_outcomes(cfg, args.split)
+    df = load_outcomes(cfg, args.split, args.prefix)
     if df.empty:
         raise SystemExit("no predictions found")
+    first = next(iter(pool_files(split_dir(cfg) / "pools", args.prefix + "baseline", args.split).values()))
+    k = len(next(read_jsonl(first))["candidates"])  # pool size of this family (50, or 15 for k15_)
     rt = rates(df)
-    dec = decompose(df, cfg["adversarial"]["flood_ns"])
-    out = OUT_DIR / cfg["dataset"] / f"decomposition_{args.split}"
+    dec = decompose(df, cfg["adversarial"]["flood_ns"], r_random=1 / k)
+    out = OUT_DIR / cfg["dataset"] / f"decomposition_{args.prefix}{args.split}"
     out.mkdir(parents=True, exist_ok=True)
     rt.to_csv(out / "rates.csv", index=False)
     dec.to_csv(out / "decomposition.csv", index=False)
-    md = summary_md(dec, rt, f"{cfg['dataset']} / {args.split}: recency-prior decomposition")
+    md = summary_md(dec, rt, f"{cfg['dataset']} / {args.prefix}{args.split}: recency-prior decomposition")
     (out / "summary.md").write_text(md)
     print(md)
 

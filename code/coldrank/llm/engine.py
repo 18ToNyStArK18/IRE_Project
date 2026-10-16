@@ -25,6 +25,7 @@ from pathlib import Path
 from coldrank.common import stable_hash
 
 YES_SPELLINGS = ("Yes", " Yes")
+EXACT_TOPK = 500  # depth of the full-vocabulary logprob list used to verify fast pointwise scores
 NO_SPELLINGS = ("No", " No")
 
 
@@ -101,7 +102,9 @@ class VLLMEngine:
 
         self.SamplingParams = SamplingParams
         self.cfg = mcfg
-        kw = {"gpu_memory_utilization": gpu_memory_utilization}
+        # max_logprobs: the exact pointwise reference needs deep top-k lists (Llama-2-7B puts
+        # "No" far below the top 20; its Yes-No log-odds are about +5)
+        kw = {"gpu_memory_utilization": gpu_memory_utilization, "max_logprobs": EXACT_TOPK}
         kw.update(mcfg.get("vllm") or {})  # optional per-model engine options (models.yaml `vllm:`)
         self.llm = LLM(
             model=mcfg["hf_id"],
@@ -147,11 +150,11 @@ class VLLMEngine:
         return res
 
     def yes_no_exact(self, prompts: list[str]) -> list[float]:
-        """Reference for yes_no(): one unrestricted greedy step returning the top-20 logprobs
-        over the FULL vocabulary, i.e. the model's exact log p(t | prompt). Returns NaN for a
-        prompt where a Yes/No spelling falls outside the top 20. (Prompt logprobs would be the
+        """Reference for yes_no(): one unrestricted greedy step returning the top-EXACT_TOPK
+        logprobs over the FULL vocabulary, i.e. the model's exact log p(t | prompt). Returns NaN
+        for a prompt where a Yes/No spelling falls outside them. (Prompt logprobs would be the
         other way, but in vLLM 0.8.5 V0 they crash when prefix caching is on.)"""
-        sp = self.SamplingParams(max_tokens=1, temperature=0.0, logprobs=20)
+        sp = self.SamplingParams(max_tokens=1, temperature=0.0, logprobs=EXACT_TOPK)
         outs = self.llm.generate(prompts, sp, use_tqdm=True)
         res = []
         for o in outs:

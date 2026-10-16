@@ -73,20 +73,35 @@ def history_block(hist: list[dict], brand: bool) -> str:
     return f"The user's purchase history, from oldest to most recent {format_header(hist, brand)}:\n{lines}"
 
 
-def candidate_block(cands: list[dict], brand: bool) -> str:
-    lines = "\n".join(f"[{k}] {item_line(c, brand)}" for k, c in enumerate(cands, 1))
+# Letter codes (prompt.id_style: codes). Numbered IDs made models copy the prompt order
+# ("[1] > [2] > ..." in 90-100% of outputs); two-letter codes cut this sharply (teammates'
+# prompt experiment). Candidates get consonant pairs; worked examples get vowel pairs, which
+# never label a real candidate, so a copied example answer cannot parse as a ranking.
+CODE_LETTERS = "BCDFGHJKLMNPQRSTVWXZ"
+EXAMPLE_CODES = ["AE", "IO", "UA", "EO", "OI"]
+
+
+def candidate_codes(key: str, shuffle: int, cands: list[dict]) -> list[str]:
+    pairs = [a + b for a in CODE_LETTERS for b in CODE_LETTERS if a != b]
+    return rng_for("codes", key, shuffle, [c["item_id"] for c in cands]).sample(pairs, len(cands))
+
+
+def candidate_block(cands: list[dict], brand: bool, labels: list[str] | None = None) -> str:
+    labels = labels or [str(k) for k in range(1, len(cands) + 1)]
+    lines = "\n".join(f"[{lab}] {item_line(c, brand)}" for lab, c in zip(labels, cands))
     return f"Candidate items {format_header(cands, brand)}:\n{lines}"
 
 
-def final_line(ids: list[int]) -> str:
-    return "FINAL: " + " > ".join(f"[{i}]" for i in ids)
+def final_line(ids: list[int], labels: list[str] | None = None) -> str:
+    return "FINAL: " + " > ".join(f"[{labels[i - 1] if labels else i}]" for i in ids)
 
 
-def format_instruction(n: int) -> str:
+def format_instruction(n: int, codes: bool = False) -> str:
+    tok = "code" if codes else "id"
     return (
-        "End your answer with one line in exactly this format, listing the IDs of the "
+        f"End your answer with one line in exactly this format, listing the {'codes' if codes else 'IDs'} of the "
         f"{n} candidates the user is most likely to purchase next, best first:\n"
-        "FINAL: [id] > [id] > ... > [id]"
+        f"FINAL: [{tok}] > [{tok}] > ... > [{tok}]"
     )
 
 
@@ -114,19 +129,34 @@ SSC_STEPS = (
 )
 
 
-def _example_block(ex: dict, kind: str, brand: bool) -> str:
+def _example_block(ex: dict, kind: str, brand: bool, codes: bool = False) -> str:
     reasoning = ex[kind]
     final = ex[f"{kind}_final"]
+    labels = EXAMPLE_CODES[: len(ex["candidates"])] if codes else None
+    if codes:  # the example reasoning refers to candidates as [k]; rewrite to the example codes
+        for k, lab in enumerate(labels, 1):
+            reasoning = reasoning.replace(f"[{k}]", f"[{lab}]")
     return (
-        f"{history_block(ex['history'], brand)}\n\n{candidate_block(ex['candidates'], brand)}\n\n"
-        f"Answer:\n{reasoning}\n{final_line(final)}"
+        f"{history_block(ex['history'], brand)}\n\n{candidate_block(ex['candidates'], brand, labels)}\n\n"
+        f"Answer:\n{reasoning}\n{final_line(final, labels)}"
     )
 
 
-def _user_text(method: str, hist: list[dict], cands: list[dict], n: int) -> tuple[str, str]:
-    """(user message, assistant prefill) for a listwise method."""
+def _user_text(method: str, hist: list[dict], cands: list[dict], n: int,
+               labels: list[str] | None = None) -> tuple[str, str]:
+    """(user message, assistant prefill) for a listwise method. `labels` = letter codes
+    (id_style: codes) or None for numbered IDs."""
     brand = method.startswith("structural")
-    task = f"{history_block(hist, brand)}\n\n{candidate_block(cands, brand)}"
+    codes = labels is not None
+    task = f"{history_block(hist, brand)}\n\n{candidate_block(cands, brand, labels)}"
+    if codes and method in ("direct", "direct_v2", "direct_sw"):
+        # teammates' frozen `direct_codes_free`: letter codes, no prefill
+        return (
+            f"{task}\n\nRank the candidates by how likely the user is to purchase them next. Do not explain. "
+            f"Output only one line in exactly this format, listing the codes of the {n} most likely candidates, "
+            "best first:\nFINAL: [code] > [code] > ... > [code]",
+            "",
+        )
     if method == "direct":
         return (
             f"{task}\n\nRank the candidates by how likely the user is to purchase them next. Do not explain. "
@@ -148,7 +178,7 @@ def _user_text(method: str, hist: list[dict], cands: list[dict], n: int) -> tupl
     if method in ("base", "fast"):
         exs = [EXAMPLE_1, EXAMPLE_2] if method == "base" else [EXAMPLE_1]
         kind = "base" if method == "base" else "fast"
-        demo = "\n\n".join(f"Example {k}:\n{_example_block(ex, kind, False)}" for k, ex in enumerate(exs, 1))
+        demo = "\n\n".join(f"Example {k}:\n{_example_block(ex, kind, False, codes)}" for k, ex in enumerate(exs, 1))
         how = (
             "First, summarize the user's interests in two or three sentences. Then reason about which "
             "candidates fit these interests best."
@@ -157,20 +187,20 @@ def _user_text(method: str, hist: list[dict], cands: list[dict], n: int) -> tupl
         )
         return (
             f"Here {'are worked examples' if len(exs) > 1 else 'is a worked example'} of the task.\n\n{demo}\n\n"
-            f"Now the actual task.\n\n{task}\n\n{GUIDELINES} {how} {format_instruction(n)}",
+            f"Now the actual task.\n\n{task}\n\n{GUIDELINES} {how} {format_instruction(n, codes)}",
             "",
         )
     if method in ("structural", "structural_norecency"):
         recency = ", the kind of interaction, and how recent it is" if method == "structural" else ""
         steps = SR_STEPS.format(recency=recency)
-        demo = _example_block(EXAMPLE_1, "structural", True)
+        demo = _example_block(EXAMPLE_1, "structural", True, codes)
         return (
             f"Here is a worked example of the task.\n\nExample:\n{demo}\n\nNow the actual task.\n\n{task}\n\n"
-            f"{steps} {format_instruction(n)}",
+            f"{steps} {format_instruction(n, codes)}",
             "",
         )
     if method == "ssc":
-        return f"{task}\n\n{SSC_STEPS} {format_instruction(n)}", ""
+        return f"{task}\n\n{SSC_STEPS} {format_instruction(n, codes)}", ""
     raise ValueError(method)
 
 
@@ -185,6 +215,7 @@ class Rendered:
     prompt_tokens: int = 0
     overflow: bool = False
     meta: dict = field(default_factory=dict)
+    code_map: dict[str, int] | None = None   # letter code -> prompt position (id_style: codes)
 
 
 def shuffled_candidates(pool: dict, shuffle: int) -> list[dict]:
@@ -205,6 +236,7 @@ def render_listwise(
     count_tokens: Callable[[str, str, str], int] | None = None,
     max_model_len: int = 4096,
     cands: list[dict] | None = None,
+    id_style: str = "numbers",
 ) -> Rendered:
     """Render one listwise prompt. `count_tokens(system, user, prefill)` returns the
     token length of the fully formatted prompt; if given, the oldest history items
@@ -212,12 +244,15 @@ def render_listwise(
     if cands is None:  # sliding windows pass their own (already ordered) candidate subset
         cands = shuffled_candidates(pool, shuffle)
     id_map = {k: c["item_id"] for k, c in enumerate(cands, 1)}
+    labels = (candidate_codes(pool.get("shuffle_key", pool["pool_id"]), shuffle, cands)
+              if id_style == "codes" else None)
+    code_map = {lab: k for k, lab in enumerate(labels, 1)} if labels else None
     hist_all = pool["history"][-history_len:]
     n_hist = len(hist_all)
     while True:
         hist = hist_all[len(hist_all) - n_hist:]
-        user, prefill = _user_text(method, hist, cands, top_n)
-        r = Rendered(SYSTEM, user, prefill, id_map, n_hist)
+        user, prefill = _user_text(method, hist, cands, top_n, labels)
+        r = Rendered(SYSTEM, user, prefill, id_map, n_hist, code_map=code_map)
         if count_tokens is None:
             r.max_new_tokens = GEN_CAP[method]
             return r
@@ -246,18 +281,25 @@ def render_pointwise(pool: dict, cand: dict, history_len: int) -> tuple[str, str
 _BRACKET = re.compile(r"\[\s*(\d{1,3})\s*\]")
 
 
-def parse_ranking(text: str, n_cands: int) -> tuple[list[int], str]:
-    """Extract candidate IDs (1..n_cands), de-duplicated, in order.
+_CODE = re.compile(r"\[\s*([A-Za-z]{2})\s*\]")
 
+
+def parse_ranking(text: str, n_cands: int, code_map: dict[str, int] | None = None) -> tuple[list[int], str]:
+    """Extract candidate positions (1..n_cands), de-duplicated, in order.
+
+    With `code_map` (letter codes), bracketed codes are mapped to positions; codes that
+    label no candidate (e.g. copied from the worked example) are ignored.
     Primary: the bracketed IDs after the LAST 'FINAL:'. Fallback: the last line with
     at least two bracketed IDs. Returns (ids, mode) with mode in
     {'final', 'fallback_line', 'fail'}.
     """
+    pattern = _CODE if code_map else _BRACKET
+
     def ids_from(s: str) -> list[int]:
         out, seen = [], set()
-        for m in _BRACKET.finditer(s):
-            k = int(m.group(1))
-            if 1 <= k <= n_cands and k not in seen:
+        for m in pattern.finditer(s):
+            k = code_map.get(m.group(1).upper()) if code_map else int(m.group(1))
+            if k is not None and 1 <= k <= n_cands and k not in seen:
                 seen.add(k)
                 out.append(k)
         return out
@@ -269,7 +311,7 @@ def parse_ranking(text: str, n_cands: int) -> tuple[list[int], str]:
         if ids:
             return ids, "final"
     for line in reversed(text.splitlines()):
-        if len(_BRACKET.findall(line)) >= 2:
+        if len(pattern.findall(line)) >= 2:
             ids = ids_from(line)
             if ids:
                 return ids, "fallback_line"

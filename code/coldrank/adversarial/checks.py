@@ -22,7 +22,7 @@ def _strip(c: dict, *keys: str) -> dict:
 def check_common(p: dict) -> None:
     ids = _ids(p)
     T = date_to_ts(p["cutoff_T"])
-    assert len(ids) == N_CANDS == len(set(ids)), p["pool_id"]
+    assert len(ids) == p.get("pool_size", N_CANDS) == len(set(ids)), p["pool_id"]  # 50, or 15 for k15_* pools
     golds = [c for c in p["candidates"] if c["is_gold"]]
     assert len(golds) == 1 and golds[0]["item_id"] == p["gold_item_id"] and golds[0]["role"] == GOLD, p["pool_id"]
     assert not set(ids) & {h["item_id"] for h in p["history"]}, p["pool_id"]
@@ -97,7 +97,8 @@ def check_a5(p: dict, a1: dict, n: int) -> None:
     T = date_to_ts(p["cutoff_T"])
     assert p["shuffle_key"] == a1["pool_id"] and _ids(p) == _ids(a1), p["pool_id"]
     relabeled = [c for c in p["candidates"] if c["role"] == RELABELED]
-    assert len(relabeled) == n and sum(c["new_dated"] for c in p["candidates"]) == 10 + n, p["pool_id"]
+    n_traps = sum(c["role"] == TRAP for c in a1["candidates"])
+    assert len(relabeled) == n and sum(c["new_dated"] for c in p["candidates"]) == n_traps + n, p["pool_id"]
     least_similar = sorted((c for c in a1["candidates"] if c["role"] == WARM),
                            key=lambda c: (c["sim_to_history"], c["item_id"]))[:n]
     assert {c["item_id"] for c in relabeled} == {c["item_id"] for c in least_similar}, p["pool_id"]

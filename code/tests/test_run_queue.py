@@ -61,6 +61,7 @@ def test_sliding_window_moves_gold_to_top():
     from tests.test_prompts_eval import make_pool
 
     cfg = load_config("amazon_vg")
+    cfg["prompt"]["id_style"] = "numbers"  # the fake engine answers with numbered IDs
     pools = [make_pool(pool_id=f"p{k}") for k in range(5)]
     eng = _GoldPicker("Cold game 3")
     raw, preds = run_sliding(eng, "chatml", pools, cfg, 100_000)

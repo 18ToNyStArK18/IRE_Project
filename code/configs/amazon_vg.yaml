@@ -38,6 +38,8 @@ prompt:
   history_len: {direct: 20, base: 20, fast: 40, structural: 20, ssc: 20, pointwise: 20}
   top_n: 10              # listwise output length
   shuffles: 3
+  id_style: codes        # two-letter candidate codes instead of [1]..[K]: numbered IDs made models
+                         # copy the prompt order (team decision, 2026-10-16; earlier runs used numbers)
 
 # --- adversarial variants (coldrank.adversarial; plan_adversarial.md) ---
 adversarial:

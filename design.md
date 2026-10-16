@@ -299,3 +299,37 @@ Evidence: our Mistral runs (dev-direct job 20873, promptcheck job 21054) and the
   - Li et al.'s Netflix gains come from **Qwen-2.5-32B with SFT/GRPO**, on a catalogue (movies/shows) with rich descriptive metadata, and are **reported only as relative improvements** over their own Fast-Reason baseline. They never show absolute accuracy against a date-only ranker.
   - Our domain carries little content signal: text similarity alone scores Recall@1 0.041 (random 0.029); histories are short (median 8.5) and stale (median 281 days between the last history item and the target); many targets are hardware or accessories.
 - **Implication:** on Amazon Video Games, zero-shot 2023 7B/13B models do not show the cold-start competence that the recency question presupposes. The one model that "succeeds" does so through the date shortcut. That supports the project's thesis, but it is a narrow base.
+
+### K = 15 pools and letter codes; Llama-2-7B on the 15-candidate baseline (2026-10-16, team decision)
+- **Model focus:** Llama-2-7B-Chat (`llama2_7b`, TheBloke AWQ, pinned revision), the only model with above-chance pointwise accuracy in the teammates' runs (its gain was entirely Δrecency).
+- **Pool size 15**, keeping Li et al.'s 4:1 warm:cold ratio (`coldrank/adversarial/resize.py`, `python -m coldrank.adversarial.resize`). Every K = 15 pool is derived **from the corresponding 50-pool**, so the gold, history and SASRec order are unchanged and instances stay paired across conditions:
+  - `k15_baseline`: the 12 best-SASRec warm items + gold + 2 cold negatives (random: 2 of the 9 sampled; hard: the 2 most similar);
+  - `k15_a2_swap/a3_hide/a4_shuffle`: the same date-variant functions applied to `k15_baseline`;
+  - `k15_a6_allcold`: gold + 14 of the 49 cold negatives;
+  - `k15_a1_oldgold`: gold + 11 best warm + 3 of the 10 traps;
+  - `k15_a1ctrl`: trap slots refilled by the next warm ranks (12–14);
+  - `k15_a5_n{1,2,5,10}`: relabeled dates copied from the 50-pool's traps.
+  - Pools carry `pool_size: 15`; all `adversarial.checks` invariants pass (generalised from 50 to any size; the A5 check counts the pool's traps instead of assuming 10).
+  - Counts: 150 / 800 (A6 799) and 144 / 967 for the A1 family.
+- **Deviation from Li et al. (40 + 10):** it makes listwise prompts feasible for 7B models at a 4k context. Measured with the Llama-2 tokenizer: 1.2–2.4k prompt tokens, 0 overflow, ~10 history items kept (5 at K = 50). Consequences:
+  - chance is 1/15;
+  - the date shortcut is much stronger: random-among-newest-3 ≈ 0.36, newest-3 + text ≈ 0.59 on test (random negatives).
+- **Heuristic fix:** `newest_set` used a fixed 10; it now uses 1/5 of the pool (10 of 50, 3 of 15). 50-pool numbers are unchanged (0.111 / 0.324).
+- **Decomposition:** `--prefix k15_` selects the family; ∆evidence uses chance = 1/K, computed from the pool files.
+- **K = 15 reference numbers (test, Recall@1, random negatives):**
+  - random 0.055;
+  - random-among-newest 0.360;
+  - newest-first 0.346;
+  - text 0.098;
+  - newest-3 + text 0.590.
+  - Under A2, A3 and A4 the date heuristics collapse (0.000 / 0.06 / 0.06–0.09). A1: newest-first Trap@1 = 1. A1-ctrl newest-first 0.523.
+  - Decomposition, "newest + text": ∆recency +0.492*, swap sensitivity +0.590*, trap effect +0.178*, flood lift (n = 10) +0.996*. For text similarity all are 0.
+- **Letter codes for all listwise methods** (`prompt.id_style: codes`, the teammates' frozen `direct_codes_free`):
+  - candidates get seeded two-consonant codes; worked examples get vowel codes (AE, IO, …) that never label a real candidate, so copying the example's answer cannot parse;
+  - Direct-Rec has no prefill; the parser maps codes to positions.
+  - Earlier runs used numbered IDs (still available with `id_style: numbers`).
+- **Run (stage `k15-baseline`, `llm_ada.sbatch`):** Llama-2-7B × {direct, pointwise, base, fast, structural, structural_norecency, ssc} × {random, hard} × {dev, then test} on `k15_baseline`, 28 tasks, ~26 GPU-h estimated (≈ 6–7 h on 4 GPUs). The fast-vs-exact pointwise check now runs at the start of every job.
+- **Result of job 23791 (dev, 150 pools; full write-up: `analysis_2026-10-16_k15.md`):**
+  - **Pointwise is the only method above chance:** Recall@1 0.167 [0.107, 0.227] random negatives, 0.113 hard (chance 0.067). It ranks the gold first among the 3 new items 49% of the time (chance 33%) and prefers new items (Cold@1 0.33 / 0.47 vs 0.20). It stays far below newest-first (0.347) and newest + text (0.580).
+  - **Direct-Rec and the 5 reasoning methods are at chance** (0.013–0.067). Reasoning outputs are usable only 25–48% of the time (placeholder/example copying, no final line). Context no longer overflows at K = 15.
+  - **Decision pending:** run pointwise on the K = 15 variants (dev) to decompose; drop listwise/reasoning for this model.

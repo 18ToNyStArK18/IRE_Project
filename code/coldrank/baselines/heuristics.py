@@ -16,14 +16,18 @@ from coldrank.common import OUT_DIR, date_to_ts, load_config, pool_files, read_j
 from coldrank.data.split import split_dir
 from coldrank.eval.metrics import sort_by_score, tie_key
 
-N_NEWEST = 10
+NEW_SHARE = 0.2  # Li et al.'s pools are 1/5 new (10 of 50); the heuristics look at the newest 1/5
 
 
 def _date_score(c: dict) -> float:
     return float(date_to_ts(c["date"])) if c.get("date") else float("-inf")
 
 
-def newest_set(pool: dict, n: int = N_NEWEST) -> set[str]:
+def newest_set(pool: dict, n: int | None = None) -> set[str]:
+    """The n newest candidates by displayed date; n defaults to 1/5 of the pool
+    (10 of 50, 3 of 15), i.e. the number of cold slots."""
+    if n is None:
+        n = max(1, round(NEW_SHARE * len(pool["candidates"])))
     cs = [c for c in pool["candidates"] if c.get("date")]
     order = sorted(cs, key=lambda c: (-_date_score(c), tie_key(pool["pool_id"], c["item_id"])))
     return {c["item_id"] for c in order[:n]}
