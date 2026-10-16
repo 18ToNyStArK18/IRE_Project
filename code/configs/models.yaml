@@ -40,6 +40,11 @@ mistral_7b:
   max_model_len: 4096          # native 8k, capped for parity
   listwise: true
   trust_remote_code: false
+  vllm:
+    # Mistral v0.1 uses 4,096-token sliding-window attention, which vLLM cannot combine with
+    # prefix caching. With max_model_len = 4096 = the window, no token ever leaves the window,
+    # so disabling it gives identical attention.
+    disable_sliding_window: true
 
 qwen_7b:
   hf_id: Qwen/Qwen-7B-Chat-Int4

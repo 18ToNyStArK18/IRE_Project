@@ -92,12 +92,17 @@ class HFEngine:
         return out
 
 
+HFEngine.yes_no_exact = HFEngine.yes_no  # the HF path is already exact
+
+
 class VLLMEngine:
     def __init__(self, mcfg: dict, gpu_memory_utilization: float = 0.90):
         from vllm import LLM, SamplingParams
 
         self.SamplingParams = SamplingParams
         self.cfg = mcfg
+        kw = {"gpu_memory_utilization": gpu_memory_utilization}
+        kw.update(mcfg.get("vllm") or {})  # optional per-model engine options (models.yaml `vllm:`)
         self.llm = LLM(
             model=mcfg["hf_id"],
             revision=mcfg["revision"],
@@ -105,10 +110,10 @@ class VLLMEngine:
             quantization=mcfg.get("quantization"),
             dtype="float16",  # 2080 Ti (sm_75) has no bf16
             max_model_len=mcfg["max_model_len"],
-            gpu_memory_utilization=gpu_memory_utilization,
             trust_remote_code=mcfg.get("trust_remote_code", False),
             enable_prefix_caching=True,
             seed=0,
+            **kw,
         )
         self.tok = self.llm.get_tokenizer()
         self.yes_ids = answer_token_ids(self.tok, YES_SPELLINGS)
@@ -123,33 +128,50 @@ class VLLMEngine:
         return [o.outputs[0].text for o in outs]
 
     def yes_no(self, prompts: list[str]) -> list[float]:
-        # For each prompt and each answer token id t, score the token sequence
-        # prompt_ids + [t] and read t's prompt logprob: exact log p(t | prompt).
-        reqs, index = [], []
-        for k, p in enumerate(prompts):
-            ids = self.tok.encode(p)
-            for t in self.yes_ids + self.no_ids:
-                reqs.append({"prompt_token_ids": ids + [t]})
-                index.append((k, t))
-        sp = self.SamplingParams(max_tokens=1, prompt_logprobs=0, temperature=0.0)
-        outs = self.llm.generate(reqs, sp, use_tqdm=True)
-        lp: dict[tuple[int, int], float] = {}
-        for (k, t), o in zip(index, outs):
-            last = o.prompt_logprobs[-1]
-            lp[(k, t)] = last[t].logprob
-        return [
-            logsumexp([lp[(k, t)] for t in self.yes_ids]) - logsumexp([lp[(k, t)] for t in self.no_ids])
-            for k in range(len(prompts))
-        ]
+        """Fast path: generate ONE token restricted to the Yes/No token ids and read their
+        logprobs. Restricting the vocabulary renormalizes over those ids only, which
+        leaves log p(Yes) - log p(No) unchanged, and prefix caching reuses the shared
+        history across a pool's 50 candidates. Verified against yes_no_exact()
+        (run.py --verify-pointwise) before a pointwise run is trusted."""
+        ids = self.yes_ids + self.no_ids
+        sp = self.SamplingParams(max_tokens=1, temperature=0.0, logprobs=len(ids), allowed_token_ids=ids)
+        outs = self.llm.generate(prompts, sp, use_tqdm=True)
+        res = []
+        for o in outs:
+            lp = o.outputs[0].logprobs[0]  # {token_id: Logprob} for the single generated position
+            missing = [t for t in ids if t not in lp]
+            if missing:
+                raise RuntimeError(f"vLLM returned no logprob for token ids {missing}; "
+                                   "this vLLM version does not apply allowed_token_ids before logprobs")
+            res.append(logsumexp([lp[t].logprob for t in self.yes_ids]) - logsumexp([lp[t].logprob for t in self.no_ids]))
+        return res
+
+    def yes_no_exact(self, prompts: list[str]) -> list[float]:
+        """Reference for yes_no(): one unrestricted greedy step returning the top-20 logprobs
+        over the FULL vocabulary, i.e. the model's exact log p(t | prompt). Returns NaN for a
+        prompt where a Yes/No spelling falls outside the top 20. (Prompt logprobs would be the
+        other way, but in vLLM 0.8.5 V0 they crash when prefix caching is on.)"""
+        sp = self.SamplingParams(max_tokens=1, temperature=0.0, logprobs=20)
+        outs = self.llm.generate(prompts, sp, use_tqdm=True)
+        res = []
+        for o in outs:
+            lp = o.outputs[0].logprobs[0]
+            if any(t not in lp for t in self.yes_ids + self.no_ids):
+                res.append(float("nan"))
+                continue
+            res.append(logsumexp([lp[t].logprob for t in self.yes_ids]) - logsumexp([lp[t].logprob for t in self.no_ids]))
+        return res
 
 
 class CachedEngine:
     """On-disk cache in front of an engine. One JSONL file per model."""
 
-    def __init__(self, engine, cache_dir: Path, model_key: str):
+    def __init__(self, engine, cache_dir: Path, model_key: str, cache_tag: str | None = None):
         self.engine = engine
         self.cfg = engine.cfg
-        self.path = Path(cache_dir) / f"{model_key}.jsonl"
+        # cache_tag gives each parallel worker its own file: concurrent appends to one
+        # file (especially on a network filesystem) can interleave and lose entries.
+        self.path = Path(cache_dir) / (f"{model_key}__{cache_tag}.jsonl" if cache_tag else f"{model_key}.jsonl")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.ident = (model_key, engine.cfg["hf_id"], engine.cfg["revision"], engine.cfg.get("quantization"))
         self.mem: dict[str, object] = {}
@@ -194,11 +216,12 @@ class CachedEngine:
         return [self.mem[k] for k in keys]
 
 
-def make_engine(mcfg: dict, backend: str, cache_dir: Path, model_key: str, **kw) -> CachedEngine:
+def make_engine(mcfg: dict, backend: str, cache_dir: Path, model_key: str, cache_tag: str | None = None,
+                **kw) -> CachedEngine:
     if backend == "vllm":
         eng = VLLMEngine(mcfg, **kw)
     elif backend == "hf":
         eng = HFEngine(mcfg, **kw)
     else:
         raise ValueError(backend)
-    return CachedEngine(eng, cache_dir, model_key)
+    return CachedEngine(eng, cache_dir, model_key, cache_tag)

@@ -16,9 +16,21 @@ __pycache__/
 venv/
 .ipynb_checkpoints/
 
-# Datasets and model outputs (large; download/regenerate instead of committing)
-data/
-outputs/
+# Datasets and model outputs (large; download/regenerate instead of committing).
+# Anchored to the project root: an unanchored `data/` also matched code/coldrank/data/,
+# so the data-loading package was never committed.
+/data/
+/outputs/
+
+# ADA cluster scripts (machine/account-specific; kept locally, not in git)
+code/scripts/*.sbatch
+code/scripts/ada_*.sh
+code/scripts/setup_ada.sh
+code/scripts/submit.sh
+code/scripts/progress.sh
+code/scripts/collect_results.sh
+code/scripts/make_tasks.py
+code/scripts/write_manifest.py
 
 # Editor / OS
 .vscode/

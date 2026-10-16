@@ -1,0 +1,7 @@
+{
+  "pools": 20,
+  "seconds": 47.1,
+  "final": 1.0,
+  "overflow_rate": 0.0,
+  "mean_prompt_tokens": 2331.7
+}

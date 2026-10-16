@@ -17,7 +17,7 @@ from typing import Callable
 from coldrank.common import rng_for
 from coldrank.prompts.examples import EXAMPLE_1, EXAMPLE_2
 
-METHODS = ("direct", "base", "fast", "structural", "structural_norecency", "ssc")
+METHODS = ("direct", "direct_v2", "direct_sw", "base", "fast", "structural", "structural_norecency", "ssc")
 
 SYSTEM = (
     "You are an expert recommender system for an online video game store. "
@@ -25,8 +25,8 @@ SYSTEM = (
 )
 
 # Max new tokens per method, and the minimum we accept before trimming history.
-GEN_CAP = {"direct": 80, "base": 768, "fast": 512, "structural": 1024, "structural_norecency": 1024, "ssc": 1024}
-GEN_MIN = {"direct": 60, "base": 400, "fast": 300, "structural": 600, "structural_norecency": 600, "ssc": 600}
+GEN_CAP = {"direct": 80, "direct_v2": 80, "direct_sw": 80, "base": 768, "fast": 512, "structural": 1024, "structural_norecency": 1024, "ssc": 1024}
+GEN_MIN = {"direct": 60, "direct_v2": 60, "direct_sw": 60, "base": 400, "fast": 300, "structural": 600, "structural_norecency": 600, "ssc": 600}
 MIN_HISTORY = 5
 
 
@@ -134,6 +134,17 @@ def _user_text(method: str, hist: list[dict], cands: list[dict], n: int) -> tupl
             "best first:\nFINAL: [id] > [id] > ... > [id]",
             "FINAL: [",
         )
+    if method in ("direct_v2", "direct_sw"):
+        # v2: no prefill and a scrambled example. With the [id] template and the "FINAL: ["
+        # prefill, Mistral-7B answered "[1] > [2] > ... > [10]" for 446/450 dev prompts.
+        ex = " > ".join(f"[{i}]" for i in (12, 3, 17, 8, 5)[: min(n, 5)])
+        return (
+            f"{task}\n\nRank the candidates by how likely the user is to purchase them next, judging each "
+            "candidate by how well it fits the user's purchase history. The candidates are listed in random "
+            "order: do not simply copy that order. Do not explain. Output only one line with the IDs of the "
+            f"{n} most likely candidates, best first, for example:\nFINAL: {ex} > ...",
+            "",
+        )
     if method in ("base", "fast"):
         exs = [EXAMPLE_1, EXAMPLE_2] if method == "base" else [EXAMPLE_1]
         kind = "base" if method == "base" else "fast"
@@ -193,11 +204,13 @@ def render_listwise(
     top_n: int,
     count_tokens: Callable[[str, str, str], int] | None = None,
     max_model_len: int = 4096,
+    cands: list[dict] | None = None,
 ) -> Rendered:
     """Render one listwise prompt. `count_tokens(system, user, prefill)` returns the
     token length of the fully formatted prompt; if given, the oldest history items
     are dropped until the prompt leaves at least GEN_MIN[method] tokens to generate."""
-    cands = shuffled_candidates(pool, shuffle)
+    if cands is None:  # sliding windows pass their own (already ordered) candidate subset
+        cands = shuffled_candidates(pool, shuffle)
     id_map = {k: c["item_id"] for k, c in enumerate(cands, 1)}
     hist_all = pool["history"][-history_len:]
     n_hist = len(hist_all)

@@ -48,7 +48,11 @@ def test_render_listwise_all_methods(method):
     r = render_listwise(pool, method, 0, 20, 10)
     assert sorted(r.id_map) == list(range(1, 51))
     assert set(r.id_map.values()) == {c["item_id"] for c in pool["candidates"]}
-    assert "[50]" in r.user and "FINAL: [id]" in r.user
+    if method in ("direct_v2", "direct_sw"):
+        assert "[50]" in r.user and "FINAL: [12] > [3]" in r.user and "do not simply copy" in r.user
+        assert r.prefill == ""
+    else:
+        assert "[50]" in r.user and "FINAL: [id]" in r.user
     assert r.user.count("Hist ") == 20  # last 20 history items
     if method == "direct":
         assert r.prefill == "FINAL: ["

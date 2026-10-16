@@ -221,3 +221,67 @@ Every choice made while implementing `code/`, with the reason. Values live in `c
   - flood lift = 0 for a date-blind model;
   - skipping missing conditions;
   - the instance-set assertion.
+
+### Running on ADA (4 × RTX 2080 Ti, qos=medium)
+- **Our model is Mistral-7B-Instruct** (`mistral_7b`, the default in `scripts/llm_ada.sbatch`); a teammate runs Qwen-7B-Chat with `MODEL=qwen_7b`. Both checkpoints are downloaded to `~/IRE_Project/hf_cache`.
+- **ADA facts (checked on the cluster):**
+  - account `research`, partition `u22`;
+  - qos `medium` allows 4 days, 4 GPUs, 40 CPUs and 125 GB per job;
+  - home has 40 GB (11 GB used), `/share1/$USER` has 100 GB;
+  - modules include `u22/python/3.12.4` and CUDA 9.2–12.9;
+  - the login node `ada-gw1` has internet (PyPI and Hugging Face).
+- **Data parallelism, not tensor parallelism:** a 4-bit 7B model fits one 11 GB card, so the job runs 4 independent vLLM workers (one per GPU), each on its own task list. Tasks are assigned longest-first by estimated cost (`scripts/make_tasks.py`), so the GPUs finish at about the same time.
+- **One model load per worker:** `coldrank.llm.run --jobs-file` runs many (method, condition, neg, split) tasks in one process. Without it, vLLM startup (~2–3 min) would repeat for each of ~32 tasks.
+- **Per-worker cache files:** `--cache-tag gpu<k>` writes to `outputs/cache/<model>__gpu<k>.jsonl`. Four processes appending to one file on a network filesystem can interleave writes and lose entries.
+- **Resume:** a task with a `run_summary.json` is skipped, so a job killed by the time limit can be resubmitted. `--limit` runs write to `<split>_limit<N>/` and never count as done.
+- **Fast pointwise scoring.** The old vLLM method scored each Yes/No token by computing logprobs over the whole prompt, with no prefix reuse; for ~800k candidate prompts that is impractical.
+  - The new `VLLMEngine.yes_no` generates **one token restricted to the Yes/No ids** (`allowed_token_ids`) and reads their logprobs. Restricting the vocabulary renormalizes over those ids, which leaves log p(Yes) − log p(No) unchanged, and prefix caching reuses each pool's shared history.
+  - The exact method is kept as `yes_no_exact`. The smoke stage runs `--verify-pointwise 8` and **aborts if the two disagree by more than 0.05**. This depends on vLLM applying `allowed_token_ids` before computing logprobs, which is why vLLM is pinned and the V0 engine forced.
+- **vLLM 0.8.5 pinned, with `VLLM_USE_V1=0`:** the V0 engine supports Turing (sm_75) and Qwen v1 (`QWenLMHeadModel`), and applies logits processors before logprobs. It brings torch 2.6 / CUDA 12.4. Jobs run with `HF_HUB_OFFLINE=1`.
+- **Where the environment lives (after three failed attempts):**
+  1. venv on the login node with the system Python: the login node is **Rocky Linux 9 (Python 3.9)**, the `u22` compute nodes are **Ubuntu 22.04**, and the `u22/python/3.12.4` module exists only on the compute nodes. The venv would point to an interpreter the compute nodes lack.
+  2. Setup as a job on a compute node: pip's resolver backtracked for 40 min on vLLM's dependencies, and with `uv` the compute node's slow PyPI link (~2–3 MB/s) hit uv's 30 s timeout mid-download of the 311 MB vLLM wheel.
+  3. `/share1` is **not mounted on compute nodes**, so models live in `~/IRE_Project/hf_cache` (home: 40 GB quota).
+  - **Final setup:** `scripts/ada_setup_env.sh` runs **on the login node** with **uv's standalone CPython 3.12** (`uv python install 3.12`, stored in `$HOME`). It is self-contained, so the venv runs on both Rocky 9 and Ubuntu 22, and home is shared by all nodes. It uses `UV_HTTP_TIMEOUT=900`.
+  - Models are downloaded on the login node (Hugging Face ≈ 17 MB/s there): Mistral-7B-Instruct-v0.1-AWQ 3.9 GB and Qwen-7B-Chat-Int4 5.5 GB.
+- **Compute estimate for Qwen** (rough, ±2×, from assumed per-prompt costs on one 2080 Ti: Direct-Rec 2.5 s per prompt; reasoning 10–22 s per prompt, nearly serial because Qwen-7B has no grouped-query attention and the 4k attention cache leaves room for only 1–2 sequences; pointwise 4 s per pool):
+  - smoke: minutes;
+  - dev-direct: 7.6 GPU-h (~2 h on 4 GPUs);
+  - test-direct: 44 GPU-h (~11 h);
+  - dev-reasoning: 79 GPU-h (~20 h);
+  - test-reasoning: ~446 GPU-h (~112 h), **not feasible as specified**. It needs a reduction (e.g. one shuffle, random negatives only, or a test subsample); this is a team decision, pending.
+- **Smoke run first:** its `run_summary.json` seconds replace the assumed per-prompt costs in `make_tasks.py`.
+- **Fixes needed to run on ADA (2026-10-14):**
+  - `transformers` is **pinned to 4.51.3**. Unpinned, uv installed 5.19, which vLLM 0.8.5 cannot import (`ProcessorMixin`).
+  - `llm_ada.sbatch` requests **36 CPUs / 100 GB**: sbatch rejects 40 CPUs for one task, even though the nodes have 40 CPUs and 128 GB.
+  - **Mistral: `disable_sliding_window: true`** (`models.yaml`). Mistral v0.1's 4,096-token sliding window cannot be combined with prefix caching in vLLM. With `max_model_len` = 4096 = the window, no token ever leaves the window, so attention is identical.
+  - **Pointwise reference changed:** vLLM 0.8.5 V0 crashes on prompt logprobs when prefix caching is on (`assert len(next_token_ids) == len(query_indices)`). `yes_no_exact` now uses one unrestricted greedy step with the **top-20 logprobs over the full vocabulary** (the exact model probabilities) and skips prompts where Yes/No are not in the top 20.
+- **Smoke run, Mistral-7B-Instruct (job 20870):**
+  - fast vs exact pointwise: 8/8 comparable, max |diff| = 0.016 (fp16 noise, tolerance 0.05);
+  - Direct-Rec: 100% parsed, ~2,600 prompt tokens, no overflow;
+  - speed: ~1.6 s per Direct-Rec prompt and ~1.2 s per pointwise pool on one 2080 Ti, from a tiny batch (larger batches are faster);
+  - vLLM reports up to 10 concurrent 4,096-token sequences (grouped-query attention).
+  - dev-direct (job 20873) is therefore expected to take ≈ 1 h on 4 GPUs.
+- **Keeping results** (team request: everything must be available for later analysis):
+  - **Per task** (`outputs/<dataset>/<condition>/<neg>/<model>/<method>/<split>/`):
+    - `raw.jsonl`: every raw generation per pool and shuffle, with parse mode, prompt length, history used and the prompt-ID → item map;
+    - `preds.jsonl`: final rankings;
+    - `run_summary.json`.
+    - Prompts are not stored; they are regenerated exactly from the pool, method and shuffle seed.
+  - **Per job:** worker logs; task lists (`outputs/tasks/`); the per-GPU LLM caches (`outputs/cache/<model>__gpu<k>.jsonl`, every generation keyed by prompt hash); and a **run manifest** (`outputs/logs/<model>_<stage>_<job>/manifest.json`) written by `scripts/write_manifest.py`. The manifest holds job ID, node, GPUs and driver, stage, model and pinned revision, both configs, package versions, a SHA-256 of all code, configs and scripts, the task lists, start/end times and exit status.
+  - **`ada_sync.sh pull` copies everything, caches included,** and never deletes local files. ADA keeps its own copy.
+  - **`scripts/collect_results.sh <split>`** (run after each stage) pulls, reruns heuristics, per-condition reports and the decomposition, and copies the small files into the **git-tracked `results/<dataset>/<split>/`**: per-condition reports, the decomposition, rates, a table of all LLM run summaries, and the manifests. `outputs/` stays git-ignored because of size.
+  - Job 20873 (dev-direct) was submitted before the manifest step existed; its manifest is written after the fact.
+
+### First LLM results (Mistral-7B, dev-direct, job 20873) and the Direct-Rec fix
+- **Direct-Rec degenerated:** 446/450 dev baseline outputs were `FINAL: [1] > [2] > ... > [10]`, simply the first ten candidates in prompt order. Recall@1 = 0.007 and Cold@1 = 0.19 (chance 0.20). The parse rate was 100%, so **"parsed" does not mean "ranked"**.
+  - Every run summary now reports `identity_rate` (share of outputs starting [1], [2], [3]) and `top1_mode_share` (share of the most common first ID).
+  - Likely causes: the format template `[id] > [id] > … > [id]`, the `FINAL: [` prefill, and 50 candidates being a lot for a 7B model.
+- **Pointwise was also at chance** (Recall@1 0.007–0.013), with Cold@1 0.03–0.10 (below chance: it prefers the older candidates). Not interpretable until the model ranks the gold above chance.
+- **No recency conclusions are drawn from job 20873.** Its dev outputs are kept for the record.
+- **Diagnostic stage `promptcheck`** (job 21054; 50 dev baseline pools, random negatives):
+  1. `direct_v2` at K = 50: no prefill; a scrambled example (`FINAL: [12] > [3] > [17] > …`); "the candidates are listed in random order: do not simply copy that order".
+  2. `direct_sw` at K = 50: a RankGPT-style **sliding window** (window 20, step 10, bottom to top; 4 calls per shuffle) with the v2 prompt. This keeps Li et al.'s 50-candidate protocol.
+  3. `direct` and `direct_v2` at **K = 20** (`baseline_k20`: 16 best-SASRec warm items + gold + 3 of the 9 cold negatives, seeded; `scripts/make_k20_pools.py`). This separates the prompt effect from the pool-size effect. At K = 20, random = 0.05 and random-among-newest = 0.25.
+  - **Decision rule:** prefer a fix that keeps K = 50 (v2, then sliding window). Use K = 20 only if nothing at 50 works, and report it as a deviation.
+- **Shared task queue** (from job 21054 on): all workers read one `queue.txt` (longest task first) and claim tasks with an atomic `mkdir` (`llm.run --claim-dir`). The static shards of job 20873 left 3 GPUs idle for ~15 min because one GPU drew the four slowest tasks. Unit-tested: each task runs exactly once under concurrent workers.

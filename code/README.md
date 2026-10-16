@@ -50,6 +50,18 @@ where it stopped.
    read some `raw.jsonl` outputs. Fix prompts **only** on dev.
 3. Freeze the prompts, then run `test`.
 
+## ADA (4 GPUs, one model)
+```bash
+bash scripts/ada_sync.sh push                                  # from this machine: code + pools -> ADA
+ssh jenik.gajera@ada-gw1                                       # then: cd ~/IRE_Project/code
+nohup bash scripts/ada_setup_env.sh > ../outputs/logs/setup_env.log 2>&1 &   # once, ON THE LOGIN NODE: venv + models
+sbatch --export=ALL,STAGE=smoke scripts/llm_ada.sbatch         # MODEL=mistral_7b by default; then dev-direct, ...
+bash scripts/ada_sync.sh pull                                  # back on this machine: outputs <- ADA
+```
+- The login node (Rocky Linux 9) and the `u22` compute nodes (Ubuntu 22.04) have different system Pythons, so the venv uses uv's standalone CPython 3.12 in `$HOME`, which runs on both. It is built on the login node, whose PyPI link is faster.
+- `/share1` is mounted only on the login node, so models live in `~/IRE_Project/hf_cache`.
+- `python scripts/make_tasks.py --model mistral_7b --stage dev-direct --out /tmp/t` prints the task list and a time estimate.
+
 ## Tests
 ```bash
 python -m pytest -q -m "not slow"   # fast unit tests
