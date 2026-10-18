@@ -7,7 +7,7 @@ from coldrank.baselines.heuristics import HEURISTICS, newest_set
 from coldrank.eval.metrics import borda, pool_metrics, summarize
 from coldrank.eval.stats import bootstrap_ci, mcnemar_exact, paired_bootstrap_diff
 from coldrank.llm.chat import format_chat
-from coldrank.prompts.examples import EXAMPLE_1, EXAMPLE_2
+from coldrank.prompts.examples import EXAMPLE_1, EXAMPLE_2, NEWS_EXAMPLE_1, NEWS_EXAMPLE_2
 from coldrank.prompts.render import (
     GEN_MIN, METHODS, parse_ranking, render_listwise, render_pointwise, shuffled_candidates,
 )
@@ -30,7 +30,7 @@ def make_pool(n_warm=40, n_cold=10, n_hist=30, pool_id="p0"):
 
 
 # ---------------- examples ---------------- #
-@pytest.mark.parametrize("ex", [EXAMPLE_1, EXAMPLE_2])
+@pytest.mark.parametrize("ex", [EXAMPLE_1, EXAMPLE_2, NEWS_EXAMPLE_1, NEWS_EXAMPLE_2])
 def test_examples_gold_is_not_newest(ex):
     gold = ex["candidates"][ex["base_final"][0] - 1]
     newest = max(ex["candidates"], key=lambda c: c["date"])

@@ -27,6 +27,11 @@ from coldrank.llm.engine import make_engine
 from coldrank.prompts.render import METHODS, parse_ranking, render_listwise, render_pointwise, shuffled_candidates
 
 
+def domain_of(cfg: dict) -> str:
+    """Prompt wording for the dataset (prompts.render.DOMAINS); Amazon is the default."""
+    return cfg["prompt"].get("domain", "video_games")
+
+
 def run_listwise(engine, family: str, pools: list[dict], method: str, cfg: dict, max_len: int) -> tuple[list, list]:
     pc = cfg["prompt"]
     hist_len = pc["history_len"][history_key(method)]
@@ -36,7 +41,7 @@ def run_listwise(engine, family: str, pools: list[dict], method: str, cfg: dict,
     for p in pools:
         for s in range(pc["shuffles"]):
             r = render_listwise(p, method, s, hist_len, pc["top_n"], count, max_len,
-                                id_style=pc.get("id_style", "numbers"))
+                                id_style=pc.get("id_style", "numbers"), domain=domain_of(cfg))
             jobs.append((p, s, r))
     runnable = [j for j in jobs if j[2].max_new_tokens > 0]
     texts = engine.generate(
@@ -92,7 +97,8 @@ def run_sliding(engine, family: str, pools: list[dict], cfg: dict, max_len: int,
     for rnd, a in enumerate(starts):
         b = min(a + window, n_c)
         rendered = [render_listwise(st["pool"], "direct_sw", st["shuffle"], hist_len, pc["top_n"], count,
-                                    max_len, cands=st["order"][a:b], id_style=pc.get("id_style", "numbers"))
+                                    max_len, cands=st["order"][a:b], id_style=pc.get("id_style", "numbers"),
+                                    domain=domain_of(cfg))
                     for st in states]
         texts = engine.generate([format_chat(family, r.system, r.user, r.prefill) for r in rendered],
                                 [r.max_new_tokens for r in rendered])
@@ -138,7 +144,7 @@ def run_pointwise(engine, family: str, pools: list[dict], cfg: dict, max_len: in
         for c in p["candidates"]:
             h = hist_len
             while True:  # drop oldest history items until the prompt fits (needs 1 answer token)
-                sys_, user = render_pointwise(p, c, h)
+                sys_, user = render_pointwise(p, c, h, domain_of(cfg))
                 prompt = format_chat(family, sys_, user)
                 if engine.count_tokens(prompt) < max_len or h <= 1:
                     break
@@ -198,7 +204,7 @@ def verify_pointwise(engine, family: str, cfg: dict, n: int, tol: float = 0.05) 
     first dev baseline pool; abort if they disagree."""
     pool = next(iter(read_jsonl(split_dir(cfg) / "pools" / "baseline_random_dev.jsonl")))
     hist_len = cfg["prompt"]["history_len"]["pointwise"]
-    prompts = [format_chat(family, *render_pointwise(pool, c, hist_len)) for c in pool["candidates"][:n]]
+    prompts = [format_chat(family, *render_pointwise(pool, c, hist_len, domain_of(cfg))) for c in pool["candidates"][:n]]
     fast, exact = engine.engine.yes_no(prompts), engine.engine.yes_no_exact(prompts)
     pairs = [(a, b) for a, b in zip(fast, exact) if b == b]  # exact is NaN if Yes/No not in top-20
     print(json.dumps({"verify_pointwise_n": n, "comparable": len(pairs), "fast": fast[:4], "exact": exact[:4]}))

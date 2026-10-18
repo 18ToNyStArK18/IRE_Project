@@ -3,8 +3,9 @@
 A1      gold (warm, bought in the window, not in H_u) + 39 SASRec warm items
         + 10 traps: new items (launched in (T, target_ts]) the user never interacted
         with, with similarity to the user profile <= the `trap_quantile` quantile of
-        that instance's eligible new items. Recency and relevance point in opposite
-        directions.
+        that instance's eligible new items (Amazon), or, with `trap_source: inview`
+        (EB-NeRD), new articles shown to the user before the target and not clicked.
+        Recency and relevance point in opposite directions.
 A1-ctrl the same pool with the 10 trap slots refilled, slot by slot, by SASRec warm
         ranks 40-49: no candidate looks new.
 A5_n    the A1 pool with the n warm negatives least similar to the user relabeled
@@ -59,12 +60,19 @@ def build_oldgold(instances: list[dict], topk: dict[str, list[str]], items: pd.D
             dropped["too_few_traps"] += 1
             continue
         sims_elig = emb[elig] @ prof
-        thr = float(np.quantile(sims_elig, ac["trap_quantile"]))
         # Items launched later on the cutoff day itself display the cutoff date and would
         # not LOOK new; traps and relabel dates must display a date after the cutoff.
         shows_new = [i for i in elig if date_to_ts(ts_to_date(int(t0[i]))) > T]
         shows_new_set = set(shows_new)
-        low = [i for i, s in zip(elig, sims_elig) if s <= thr and i in shows_new_set]
+        if ac.get("trap_source") == "inview":
+            # news: new articles the user was shown and did not click (split.attach_inview_not_clicked);
+            # being skipped is the irrelevance evidence, so no similarity filter
+            thr = None
+            seen = set(r["inview_not_clicked"])
+            low = [i for i in elig if i in seen and i in shows_new_set]
+        else:
+            thr = float(np.quantile(sims_elig, ac["trap_quantile"]))
+            low = [i for i, s in zip(elig, sims_elig) if s <= thr and i in shows_new_set]
         if len(low) < n_traps:
             dropped["too_few_traps"] += 1
             continue
@@ -89,7 +97,7 @@ def build_oldgold(instances: list[dict], topk: dict[str, list[str]], items: pd.D
             "cutoff_T": ts_to_date(T),
             "target_ts": r["target_ts"],
             "gold_item_id": gold,
-            "trap_sim_threshold": round(thr, 4),
+            "trap_sim_threshold": None if thr is None else round(thr, 4),
             "history": history_records(r, it),
             "candidates": cands,
         })

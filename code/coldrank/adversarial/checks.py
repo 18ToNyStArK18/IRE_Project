@@ -76,7 +76,8 @@ def check_a1(p: dict, n_warm: int, n_traps: int) -> None:
     warm = [c for c in p["candidates"] if c["role"] == WARM]
     assert len(traps) == n_traps and len(warm) == n_warm, p["pool_id"]
     assert all(c["t0"] > T and c["new_dated"] for c in traps), p["pool_id"]
-    assert all(c["sim_to_history"] <= p["trap_sim_threshold"] + 1e-4 for c in traps), p["pool_id"]
+    if p["trap_sim_threshold"] is not None:  # None: in-view-not-clicked traps (EB-NeRD), no similarity rule
+        assert all(c["sim_to_history"] <= p["trap_sim_threshold"] + 1e-4 for c in traps), p["pool_id"]
     assert all(c["t0"] <= T and not c["new_dated"] for c in warm), p["pool_id"]
 
 

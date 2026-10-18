@@ -6,6 +6,10 @@ except that Structural Reasoning also shows the brand (Li et al. Sec. 2.2.1 give
 it extra attributes for factor matching).
 
 A displayed date of None means "hidden" (condition A3): the date field is omitted.
+
+All domain wording (system prompt, "purchase history" vs "reading history", field labels,
+guidelines, worked examples) lives in a `Domain`; config `prompt.domain` selects it.
+VIDEO_GAMES (the default) reproduces the Amazon prompts byte for byte.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from coldrank.common import rng_for
-from coldrank.prompts.examples import EXAMPLE_1, EXAMPLE_2
+from coldrank.prompts.examples import EXAMPLE_1, EXAMPLE_2, NEWS_EXAMPLE_1, NEWS_EXAMPLE_2
 
 METHODS = ("direct", "direct_v2", "direct_sw", "base", "fast", "structural", "structural_norecency", "ssc")
 
@@ -49,28 +53,39 @@ def display_category(cat: str) -> str:
     return " > ".join(parts[:3])
 
 
-def _fields(it: dict, brand: bool) -> list[tuple[str, str]]:
-    f = [("title", display_title(it["title"]))]
+def cut(text: str, n: int) -> str:
+    """Cut text at a word boundary to at most n characters (display only)."""
+    text = " ".join((text or "").split())
+    if len(text) <= n:
+        return text
+    c = text[:n].rsplit(" ", 1)[0]
+    return c.rstrip(" ,;:-|/(") or text[:n]
+
+
+def _fields(it: dict, brand: bool, dom: "Domain") -> list[tuple[str, str]]:
+    f = [("title", display_title(it["title"]) if dom.title_chars == TITLE_CHARS else cut(it["title"], dom.title_chars))]
     if it.get("date"):
-        f.append(("launch date", it["date"]))
-    f.append(("category", display_category(it.get("category", "")) or "unknown"))
+        f.append((dom.date_label, it["date"]))
+    f.append((dom.category_label, display_category(it.get("category", "")) or "unknown"))
+    if dom.summary_chars:
+        f.append(("summary", cut(it.get("subtitle", ""), dom.summary_chars) or "none"))
     if brand:
-        f.append(("brand", it.get("brand") or "unknown"))
+        f.append((dom.extra_label, it.get(dom.extra_key) or "unknown"))
     return f
 
 
-def item_line(it: dict, brand: bool) -> str:
-    return " | ".join(v for _, v in _fields(it, brand))
+def item_line(it: dict, brand: bool, dom: "Domain") -> str:
+    return " | ".join(v for _, v in _fields(it, brand, dom))
 
 
-def format_header(items: list[dict], brand: bool) -> str:
-    names = [n for n, _ in _fields(items[0], brand)] if items else ["title", "category"]
-    return f"(each item: {' | '.join(names)})"
+def format_header(items: list[dict], brand: bool, dom: "Domain") -> str:
+    names = [n for n, _ in _fields(items[0], brand, dom)] if items else ["title", dom.category_label]
+    return f"(each {dom.noun}: {' | '.join(names)})"
 
 
-def history_block(hist: list[dict], brand: bool) -> str:
-    lines = "\n".join(f"- {item_line(h, brand)}" for h in hist)
-    return f"The user's purchase history, from oldest to most recent {format_header(hist, brand)}:\n{lines}"
+def history_block(hist: list[dict], brand: bool, dom: "Domain") -> str:
+    lines = "\n".join(f"- {item_line(h, brand, dom)}" for h in hist)
+    return f"The user's {dom.history}, from oldest to most recent {format_header(hist, brand, dom)}:\n{lines}"
 
 
 # Letter codes (prompt.id_style: codes). Numbered IDs made models copy the prompt order
@@ -86,21 +101,21 @@ def candidate_codes(key: str, shuffle: int, cands: list[dict]) -> list[str]:
     return rng_for("codes", key, shuffle, [c["item_id"] for c in cands]).sample(pairs, len(cands))
 
 
-def candidate_block(cands: list[dict], brand: bool, labels: list[str] | None = None) -> str:
+def candidate_block(cands: list[dict], brand: bool, dom: "Domain", labels: list[str] | None = None) -> str:
     labels = labels or [str(k) for k in range(1, len(cands) + 1)]
-    lines = "\n".join(f"[{lab}] {item_line(c, brand)}" for lab, c in zip(labels, cands))
-    return f"Candidate items {format_header(cands, brand)}:\n{lines}"
+    lines = "\n".join(f"[{lab}] {item_line(c, brand, dom)}" for lab, c in zip(labels, cands))
+    return f"Candidate {dom.nouns} {format_header(cands, brand, dom)}:\n{lines}"
 
 
 def final_line(ids: list[int], labels: list[str] | None = None) -> str:
     return "FINAL: " + " > ".join(f"[{labels[i - 1] if labels else i}]" for i in ids)
 
 
-def format_instruction(n: int, codes: bool = False) -> str:
+def format_instruction(n: int, dom: "Domain", codes: bool = False) -> str:
     tok = "code" if codes else "id"
     return (
         f"End your answer with one line in exactly this format, listing the {'codes' if codes else 'IDs'} of the "
-        f"{n} candidates the user is most likely to purchase next, best first:\n"
+        f"{n} candidates the user is most likely to {dom.verb} next, best first:\n"
         f"FINAL: [{tok}] > [{tok}] > ... > [{tok}]"
     )
 
@@ -112,8 +127,8 @@ GUIDELINES = (
 
 SR_STEPS = (
     "Work in three steps.\n"
-    "Step 1: Identify the three most important factors behind the user's preferences (for example the "
-    "platform, the type of game or item, the brand or franchise). For each factor, build a reasoning path "
+    "Step 1: Identify the three most important factors behind the user's preferences (for example {factors}). "
+    "For each factor, build a reasoning path "
     "by listing the history items that support it.\n"
     "Step 2: For each candidate that matches at least one path, give a match score from 0 to 10 for each "
     "path. Candidates you do not list score 0.\n"
@@ -129,7 +144,53 @@ SSC_STEPS = (
 )
 
 
-def _example_block(ex: dict, kind: str, brand: bool, codes: bool = False) -> str:
+@dataclass(frozen=True)
+class Domain:
+    """Everything in a prompt that depends on the dataset."""
+    system: str
+    noun: str                 # "item" / "article"
+    nouns: str
+    history: str              # "purchase history" / "reading history"
+    verb: str                 # "purchase" / "read" (next)
+    date_label: str
+    category_label: str
+    extra_label: str          # Structural Reasoning's extra attribute
+    extra_key: str
+    title_chars: int
+    summary_chars: int        # 0: no summary field
+    guidelines: str
+    sr_factors: str           # the factor examples in Structural Reasoning's step 1
+    examples: tuple           # (example 1, example 2)
+
+
+VIDEO_GAMES = Domain(
+    system=SYSTEM, noun="item", nouns="items", history="purchase history", verb="purchase",
+    date_label="launch date", category_label="category", extra_label="brand", extra_key="brand",
+    title_chars=TITLE_CHARS, summary_chars=0, guidelines=GUIDELINES,
+    sr_factors="the platform, the type of game or item, the brand or franchise",
+    examples=(EXAMPLE_1, EXAMPLE_2),
+)
+
+NEWS = Domain(
+    system=(
+        "You are an expert recommender system for a Danish news website. The articles have been translated "
+        "into English. You recommend articles to a user based on their reading history."
+    ),
+    noun="article", nouns="articles", history="reading history", verb="read",
+    date_label="published", category_label="section", extra_label="topics", extra_key="topics",
+    title_chars=100, summary_chars=100,
+    guidelines=(
+        "Consider what the history says about the sections and topics the user reads, the stories and "
+        "people they follow, and the kind of articles they open."
+    ),
+    sr_factors="the section, the topic, the story or people involved",
+    examples=(NEWS_EXAMPLE_1, NEWS_EXAMPLE_2),
+)
+
+DOMAINS = {"video_games": VIDEO_GAMES, "news": NEWS}
+
+
+def _example_block(ex: dict, kind: str, brand: bool, dom: Domain, codes: bool = False) -> str:
     reasoning = ex[kind]
     final = ex[f"{kind}_final"]
     labels = EXAMPLE_CODES[: len(ex["candidates"])] if codes else None
@@ -137,29 +198,29 @@ def _example_block(ex: dict, kind: str, brand: bool, codes: bool = False) -> str
         for k, lab in enumerate(labels, 1):
             reasoning = reasoning.replace(f"[{k}]", f"[{lab}]")
     return (
-        f"{history_block(ex['history'], brand)}\n\n{candidate_block(ex['candidates'], brand, labels)}\n\n"
+        f"{history_block(ex['history'], brand, dom)}\n\n{candidate_block(ex['candidates'], brand, dom, labels)}\n\n"
         f"Answer:\n{reasoning}\n{final_line(final, labels)}"
     )
 
 
 def _user_text(method: str, hist: list[dict], cands: list[dict], n: int,
-               labels: list[str] | None = None) -> tuple[str, str]:
+               labels: list[str] | None = None, dom: Domain = VIDEO_GAMES) -> tuple[str, str]:
     """(user message, assistant prefill) for a listwise method. `labels` = letter codes
     (id_style: codes) or None for numbered IDs."""
     brand = method.startswith("structural")
     codes = labels is not None
-    task = f"{history_block(hist, brand)}\n\n{candidate_block(cands, brand, labels)}"
+    task = f"{history_block(hist, brand, dom)}\n\n{candidate_block(cands, brand, dom, labels)}"
     if codes and method in ("direct", "direct_v2", "direct_sw"):
         # teammates' frozen `direct_codes_free`: letter codes, no prefill
         return (
-            f"{task}\n\nRank the candidates by how likely the user is to purchase them next. Do not explain. "
+            f"{task}\n\nRank the candidates by how likely the user is to {dom.verb} them next. Do not explain. "
             f"Output only one line in exactly this format, listing the codes of the {n} most likely candidates, "
             "best first:\nFINAL: [code] > [code] > ... > [code]",
             "",
         )
     if method == "direct":
         return (
-            f"{task}\n\nRank the candidates by how likely the user is to purchase them next. Do not explain. "
+            f"{task}\n\nRank the candidates by how likely the user is to {dom.verb} them next. Do not explain. "
             f"Output only one line in exactly this format, listing the IDs of the {n} most likely candidates, "
             "best first:\nFINAL: [id] > [id] > ... > [id]",
             "FINAL: [",
@@ -169,16 +230,16 @@ def _user_text(method: str, hist: list[dict], cands: list[dict], n: int,
         # prefill, Mistral-7B answered "[1] > [2] > ... > [10]" for 446/450 dev prompts.
         ex = " > ".join(f"[{i}]" for i in (12, 3, 17, 8, 5)[: min(n, 5)])
         return (
-            f"{task}\n\nRank the candidates by how likely the user is to purchase them next, judging each "
-            "candidate by how well it fits the user's purchase history. The candidates are listed in random "
+            f"{task}\n\nRank the candidates by how likely the user is to {dom.verb} them next, judging each "
+            f"candidate by how well it fits the user's {dom.history}. The candidates are listed in random "
             "order: do not simply copy that order. Do not explain. Output only one line with the IDs of the "
             f"{n} most likely candidates, best first, for example:\nFINAL: {ex} > ...",
             "",
         )
     if method in ("base", "fast"):
-        exs = [EXAMPLE_1, EXAMPLE_2] if method == "base" else [EXAMPLE_1]
+        exs = list(dom.examples) if method == "base" else [dom.examples[0]]
         kind = "base" if method == "base" else "fast"
-        demo = "\n\n".join(f"Example {k}:\n{_example_block(ex, kind, False, codes)}" for k, ex in enumerate(exs, 1))
+        demo = "\n\n".join(f"Example {k}:\n{_example_block(ex, kind, False, dom, codes)}" for k, ex in enumerate(exs, 1))
         how = (
             "First, summarize the user's interests in two or three sentences. Then reason about which "
             "candidates fit these interests best."
@@ -187,20 +248,20 @@ def _user_text(method: str, hist: list[dict], cands: list[dict], n: int,
         )
         return (
             f"Here {'are worked examples' if len(exs) > 1 else 'is a worked example'} of the task.\n\n{demo}\n\n"
-            f"Now the actual task.\n\n{task}\n\n{GUIDELINES} {how} {format_instruction(n, codes)}",
+            f"Now the actual task.\n\n{task}\n\n{dom.guidelines} {how} {format_instruction(n, dom, codes)}",
             "",
         )
     if method in ("structural", "structural_norecency"):
         recency = ", the kind of interaction, and how recent it is" if method == "structural" else ""
-        steps = SR_STEPS.format(recency=recency)
-        demo = _example_block(EXAMPLE_1, "structural", True, codes)
+        steps = SR_STEPS.format(recency=recency, factors=dom.sr_factors)
+        demo = _example_block(dom.examples[0], "structural", True, dom, codes)
         return (
             f"Here is a worked example of the task.\n\nExample:\n{demo}\n\nNow the actual task.\n\n{task}\n\n"
-            f"{steps} {format_instruction(n, codes)}",
+            f"{steps} {format_instruction(n, dom, codes)}",
             "",
         )
     if method == "ssc":
-        return f"{task}\n\n{SSC_STEPS} {format_instruction(n, codes)}", ""
+        return f"{task}\n\n{SSC_STEPS} {format_instruction(n, dom, codes)}", ""
     raise ValueError(method)
 
 
@@ -237,6 +298,7 @@ def render_listwise(
     max_model_len: int = 4096,
     cands: list[dict] | None = None,
     id_style: str = "numbers",
+    domain: str = "video_games",
 ) -> Rendered:
     """Render one listwise prompt. `count_tokens(system, user, prefill)` returns the
     token length of the fully formatted prompt; if given, the oldest history items
@@ -247,16 +309,17 @@ def render_listwise(
     labels = (candidate_codes(pool.get("shuffle_key", pool["pool_id"]), shuffle, cands)
               if id_style == "codes" else None)
     code_map = {lab: k for k, lab in enumerate(labels, 1)} if labels else None
+    dom = DOMAINS[domain]
     hist_all = pool["history"][-history_len:]
     n_hist = len(hist_all)
     while True:
         hist = hist_all[len(hist_all) - n_hist:]
-        user, prefill = _user_text(method, hist, cands, top_n, labels)
-        r = Rendered(SYSTEM, user, prefill, id_map, n_hist, code_map=code_map)
+        user, prefill = _user_text(method, hist, cands, top_n, labels, dom)
+        r = Rendered(dom.system, user, prefill, id_map, n_hist, code_map=code_map)
         if count_tokens is None:
             r.max_new_tokens = GEN_CAP[method]
             return r
-        r.prompt_tokens = count_tokens(SYSTEM, user, prefill)
+        r.prompt_tokens = count_tokens(dom.system, user, prefill)
         room = max_model_len - r.prompt_tokens
         if room >= GEN_MIN[method] or n_hist <= MIN_HISTORY:
             r.max_new_tokens = max(0, min(GEN_CAP[method], room))
@@ -265,14 +328,16 @@ def render_listwise(
         n_hist -= 1
 
 
-def render_pointwise(pool: dict, cand: dict, history_len: int) -> tuple[str, str]:
+def render_pointwise(pool: dict, cand: dict, history_len: int, domain: str = "video_games") -> tuple[str, str]:
     """(system, user) for one candidate. Answer token is read from the next position."""
+    dom = DOMAINS[domain]
     hist = pool["history"][-history_len:]
     user = (
-        f"{history_block(hist, False)}\n\nCandidate item {format_header([cand], False)}:\n{item_line(cand, False)}\n\n"
-        "Will the user purchase this candidate item next? Answer Yes or No."
+        f"{history_block(hist, False, dom)}\n\nCandidate {dom.noun} {format_header([cand], False, dom)}:\n"
+        f"{item_line(cand, False, dom)}\n\n"
+        f"Will the user {dom.verb} this candidate {dom.noun} next? Answer Yes or No."
     )
-    return SYSTEM, user
+    return dom.system, user
 
 
 # --------------------------------------------------------------------------- #

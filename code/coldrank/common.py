@@ -21,12 +21,16 @@ CONFIG_DIR = CODE_DIR / "configs"
 
 
 def load_config(name_or_path: str | Path) -> dict[str, Any]:
-    """Load a YAML config by name (looked up in code/configs) or by path."""
+    """Load a YAML config by name (looked up in code/configs) or by path. A dataset config
+    also sets the displayed date format (`date_format`, default date only)."""
     p = Path(name_or_path)
     if not p.suffix:
         p = CONFIG_DIR / f"{name_or_path}.yaml"
     with open(p) as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f)
+    if isinstance(cfg, dict) and "dataset" in cfg:
+        set_date_format(cfg.get("date_format", DATE_ONLY))
+    return cfg
 
 
 def read_jsonl(path: str | Path) -> Iterator[dict]:
@@ -75,14 +79,28 @@ def seed_everything(seed: int) -> None:
         pass
 
 
+DATE_ONLY = "%Y-%m-%d"           # Amazon: launch dates
+DATE_TIME = "%Y-%m-%d %H:%M"     # EB-NeRD: news ages in hours, so the time is shown too
+_date_format = DATE_ONLY
+
+
+def set_date_format(fmt: str) -> None:
+    """Displayed date format for ts_to_date (set by load_config from the dataset config)."""
+    global _date_format
+    if fmt not in (DATE_ONLY, DATE_TIME):
+        raise ValueError(f"unsupported date_format {fmt!r}")
+    _date_format = fmt
+
+
 def ts_to_date(ts: int | float) -> str:
-    """Unix seconds -> 'YYYY-MM-DD' (UTC)."""
-    return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime("%Y-%m-%d")
+    """Unix seconds -> displayed date (UTC): 'YYYY-MM-DD', or 'YYYY-MM-DD HH:MM' with DATE_TIME."""
+    return datetime.fromtimestamp(int(ts), tz=timezone.utc).strftime(_date_format)
 
 
 def date_to_ts(d: str) -> int:
-    """'YYYY-MM-DD' -> Unix seconds at 00:00 UTC."""
-    return int(datetime.strptime(d, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp())
+    """'YYYY-MM-DD' (00:00) or 'YYYY-MM-DD HH:MM' -> Unix seconds, UTC."""
+    fmt = DATE_TIME if len(d) > 10 else DATE_ONLY
+    return int(datetime.strptime(d, fmt).replace(tzinfo=timezone.utc).timestamp())
 
 
 def pool_files(pool_dir: str | Path, condition: str, split: str) -> dict[str, Path]:

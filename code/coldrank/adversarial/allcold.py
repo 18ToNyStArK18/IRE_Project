@@ -49,7 +49,7 @@ def build_a6(instances: list[dict], items: pd.DataFrame, emb: Embeddings, pop: d
                 recs.append(rec)
             recs.sort(key=lambda c: c["item_id"])
             base_id = f"{r['instance_id']}__{setting}"
-            pools.append(annotate({
+            pool = {
                 "pool_id": f"{base_id}__a6_allcold",
                 "instance_id": r["instance_id"],
                 "split": r["split"],
@@ -62,5 +62,8 @@ def build_a6(instances: list[dict], items: pd.DataFrame, emb: Embeddings, pop: d
                 "gold_item_id": gold,
                 "history": history_records(r, it),
                 "candidates": recs,
-            }))
+            }
+            if n_neg + 1 != 50:  # EB-NeRD builds A6 at 15 directly (too few new articles for 49 negatives)
+                pool["pool_size"] = n_neg + 1
+            pools.append(annotate(pool))
     return pools, {"n_instances_in": len(instances), "dropped_too_few_cold": dropped}

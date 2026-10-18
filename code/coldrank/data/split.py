@@ -162,6 +162,47 @@ def assign_ids_and_subsample(
 
 
 # --------------------------------------------------------------------------- #
+# Optional steps (EB-NeRD; config keys absent for Amazon)
+# --------------------------------------------------------------------------- #
+def new_between(items: pd.DataFrame, T: int) -> tuple[np.ndarray, np.ndarray]:
+    """Cold items (t0 > T) sorted by launch time: (item_ids, t0s)."""
+    t0 = items.set_index("item_id")["t0"].astype("int64")
+    c = t0[t0 > T].sort_values(kind="mergesort")
+    return c.index.to_numpy(), c.to_numpy()
+
+
+def require_cold_negs(instances: list[dict], items: pd.DataFrame, T: int, k: int) -> tuple[list[dict], int]:
+    """Keep instances with >= k cold items launched in (T, target_ts] that are not in the
+    user's window: the pool builder's precondition for its k cold negatives."""
+    ids, t0s = new_between(items, T)
+    keep = []
+    for r in instances:
+        hi = np.searchsorted(t0s, r["target_ts"], side="right")
+        excl = set(r["window_items"])
+        if sum(1 for i in ids[:hi] if i not in excl) >= k:
+            keep.append(r)
+    return keep, len(instances) - len(keep)
+
+
+def attach_inview_not_clicked(instances: list[dict], imp: pd.DataFrame, items: pd.DataFrame, T: int) -> None:
+    """A1 traps for news (design.md §4): new articles (launched in (T, target_ts]) shown to
+    the user in an impression in [T, target_ts] that the user did not click in the window
+    and that are not in the history. Stored sorted as `inview_not_clicked`."""
+    t0 = items.set_index("item_id")["t0"].astype("int64").to_dict()
+    users = {r["user_id"] for r in instances}
+    imp = imp[(imp["ts"] >= T) & imp["user_id"].isin(users)]
+    by_user = {u: g for u, g in imp.groupby("user_id", sort=False)}
+    for r in instances:
+        g = by_user.get(r["user_id"])
+        seen = set()
+        if g is not None:
+            for v in g.loc[g["ts"] <= r["target_ts"], "inview"]:
+                seen.update(v)
+        excl = set(r["window_items"]) | {h[0] for h in r["history"]}
+        r["inview_not_clicked"] = sorted(i for i in seen - excl if i in t0 and T < t0[i] <= r["target_ts"])
+
+
+# --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
 def load_processed(dataset: str) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -187,11 +228,25 @@ def main() -> None:
     T = date_to_ts(str(cfg["cutoff_T"]))
     res = build_instances(pos, items, T, int(cfg["window_days"]), int(cfg["min_history"]))
 
+    cold_inst, old_inst = res.cold_instances, res.old_instances
+    if cfg.get("require_cold_negs"):
+        cold_inst, n_drop = require_cold_negs(cold_inst, items, T, int(cfg["require_cold_negs"]))
+        res.stats["cold_dropped_too_few_cold_negs"] = n_drop
+    if (cfg.get("adversarial") or {}).get("trap_source") == "inview":
+        imp = pd.read_parquet(DATA_DIR / "processed" / cfg["dataset"] / "impressions.parquet")
+        attach_inview_not_clicked(old_inst, imp, items, T)
+        if cfg.get("require_traps"):
+            k = int(cfg["require_traps"])
+            n0 = len(old_inst)
+            old_inst = [r for r in old_inst if len(r["inview_not_clicked"]) >= k]
+            res.stats["old_dropped_too_few_traps"] = n0 - len(old_inst)
+
     out = split_dir(cfg)
     out.mkdir(parents=True, exist_ok=True)
     seed = int(cfg["seed"])
-    c_dev, c_test = assign_ids_and_subsample(res.cold_instances, "cold", cfg["n_dev"], cfg["n_test"], seed)
-    o_dev, o_test = assign_ids_and_subsample(res.old_instances, "old", cfg["n_dev"], cfg["n_test"], seed)
+    n_test_cold = cfg.get("n_test_cold", cfg["n_test"])
+    c_dev, c_test = assign_ids_and_subsample(cold_inst, "cold", cfg["n_dev"], n_test_cold, seed)
+    o_dev, o_test = assign_ids_and_subsample(old_inst, "old", cfg["n_dev"], cfg["n_test"], seed)
     write_jsonl(out / "cold_dev.jsonl", c_dev)
     write_jsonl(out / "cold_test.jsonl", c_test)
     write_jsonl(out / "old_dev.jsonl", o_dev)

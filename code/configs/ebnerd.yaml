@@ -1,0 +1,61 @@
+# EB-NeRD (Ekstra Bladet news), small version. Every value here is logged in design.md;
+# values not commented are the Amazon ones (amazon_vg.yaml), kept identical on purpose.
+dataset: ebnerd
+date_format: "%Y-%m-%d %H:%M"   # news ages in hours: show date and time (team decision, 2026-10-17)
+
+# --- split (coldrank.data.split) ---
+cutoff_T: 2023-05-25      # first day of the validation behaviors (audit: plan_ebnerd.md E0)
+window_days: 1            # Li et al.: a single test day
+rating_threshold: 1.0     # every click is a positive (rating = 1.0 in coldrank.data.ebnerd)
+min_history: 5
+n_dev: 150
+n_test: 1000              # old-target test instances (A1 family), as for Amazon
+n_test_cold: 800          # cold-target test instances: Amazon's 800
+seed: 42
+# Keep only instances whose pools can be built, so dev/test reach their sizes after the
+# pool step (early-morning targets have few articles published since the cutoff):
+require_cold_negs: 9      # cold instances: >= 9 cold articles in (T, target time], not the user's
+require_traps: 3          # old instances: >= 3 new in-view-not-clicked articles (A1 traps; team decision 2026-10-17)
+
+# --- warm-start ranker (coldrank.warm.sasrec) ---
+sasrec:
+  kcore: 5
+  max_seq_len: 50
+  hidden: 64
+  n_layers: 2
+  n_heads: 2
+  dropout: 0.2
+  lr: 0.001
+  batch_size: 256
+  max_epochs: 200
+  patience: 10
+  seed: 42
+
+# --- pools (coldrank.pools.build) ---
+pool:
+  n_warm: 40
+  n_cold: 10
+  neg_settings: [random, hard]
+  embed_model: sentence-transformers/all-MiniLM-L6-v2   # on the English translation
+  profile_len: 20
+  dup_threshold: 0.9
+
+# --- prompts (coldrank.prompts.render) ---
+prompt:
+  domain: news            # news wording and worked examples (Amazon: video_games, the default)
+  history_len: {direct: 20, base: 20, fast: 40, structural: 20, ssc: 20, pointwise: 20}
+  top_n: 10
+  shuffles: 3
+  id_style: codes
+
+# --- adversarial variants (coldrank.adversarial) ---
+adversarial:
+  a6_n_negs: 14           # A6 built at K = 15 directly: only 68 / 265 dev / test targets have 49 new
+                          # articles published before the click (650 test have 14)
+  a1_n_warm: 46           # A1 at K = 50: gold + 46 warm + 3 traps (Amazon: 39 + 10). Requiring 10
+  a1_n_traps: 3           # skipped new articles left 865 users (heavy readers only); the K = 15 pools
+                          # we run use 3 traps either way (gold + 11 + 3, as for Amazon)
+  trap_source: inview     # traps = new articles shown to the user and not clicked (design.md §4)
+  trap_quantile: 0.25     # unused with trap_source: inview
+  ctrl_fill: 3            # A1-ctrl refills the 3 trap slots
+  flood_ns: [1, 2, 5, 10]

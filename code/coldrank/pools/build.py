@@ -31,8 +31,18 @@ from coldrank.common import date_to_ts, load_config, read_jsonl, rng_for, ts_to_
 from coldrank.data.split import split_dir
 
 
+OPTIONAL_FIELDS = ("subtitle", "topics")  # EB-NeRD only; Amazon items have neither, so its records are unchanged
+
+
 def item_text(row) -> str:
-    return f"{row['title']} | {row['category_path']}" if row["category_path"] else row["title"]
+    text = row["title"]
+    if isinstance(row.get("subtitle"), str) and row["subtitle"]:
+        text = f"{text}. {row['subtitle']}"  # news: the subtitle carries most of the content
+    return f"{text} | {row['category_path']}" if row["category_path"] else text
+
+
+def optional_fields(r) -> dict:
+    return {k: r[k] for k in OPTIONAL_FIELDS if k in r.index}
 
 
 class Embeddings:
@@ -84,6 +94,7 @@ def candidate_record(
         "sim_to_history": round(float(sim), 4),
         "pop_preT": int(pop),
         "warm_rank": warm_rank,             # 1-based SASRec rank among warm candidates; None for cold
+        **optional_fields(r),
     }
 
 
@@ -116,7 +127,7 @@ def history_records(r: dict, it: pd.DataFrame) -> list[dict]:
         h = it.loc[h_item]
         out.append({"item_id": h_item, "title": h["title"], "date": ts_to_date(int(h["t0"])),
                     "t0": int(h["t0"]), "category": h["category_path"], "brand": h["brand"],
-                    "ts": int(h_ts)})
+                    "ts": int(h_ts), **optional_fields(h)})
     return out
 
 

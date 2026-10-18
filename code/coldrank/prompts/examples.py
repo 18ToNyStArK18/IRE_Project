@@ -100,3 +100,119 @@ EXAMPLE_2 = {
     ),
     "base_final": [2, 1, 3, 5, 4],
 }
+
+
+# --------------------------------------------------------------------------- #
+# News (EB-NeRD, prompt.domain: news). Same constraints as above: invented articles dated
+# 2019, years before the 2023 data, so they cannot leak test items; the correct article
+# is not the newest (example 1: 2nd newest of 5; example 2: 4th newest of 5); the
+# reasoning never mentions dates.
+# --------------------------------------------------------------------------- #
+NEWS_EXAMPLE_1 = {
+    "history": [
+        {"title": "FC Copenhagen sign Swedish striker on a four-year deal", "date": "2019-08-02 09:14",
+         "category": "sport", "subtitle": "The Superliga champions have paid a club record fee for the 22-year-old forward",
+         "topics": "Sport, Football"},
+        {"title": "Brøndby fire their coach after a third straight defeat", "date": "2019-08-05 18:40",
+         "category": "sport", "subtitle": "The club's board acted the morning after the 0-3 loss to Midtjylland",
+         "topics": "Sport, Football"},
+        {"title": "Superliga: FCK go top after a late winner in Aarhus", "date": "2019-08-11 21:05",
+         "category": "sport", "subtitle": "The new Swedish signing scored in the 89th minute of his debut",
+         "topics": "Sport, Football"},
+        {"title": "National team squad: three new names for the Ireland match", "date": "2019-08-29 12:30",
+         "category": "sport", "subtitle": "The national coach has picked two FCK players and a goalkeeper from Brøndby",
+         "topics": "Sport, Football, National team"},
+        {"title": "Christian Eriksen: I will decide about my future soon", "date": "2019-09-02 07:55",
+         "category": "sport", "subtitle": "The Danish playmaker's contract with Tottenham runs out next summer",
+         "topics": "Sport, Football, Celebrities"},
+    ],
+    "candidates": [
+        {"title": "Electricity prices will rise sharply this winter", "date": "2019-09-03 06:10",
+         "category": "consumer", "subtitle": "Households can expect to pay several hundred kroner more a month",
+         "topics": "Economy, Energy"},
+        {"title": "FCK coach on the injury crisis: The young players must step up", "date": "2019-09-04 08:20",
+         "category": "sport", "subtitle": "Five first-team players are out before Sunday's top match against Brøndby",
+         "topics": "Sport, Football"},
+        {"title": "The royal couple celebrate their anniversary at Fredensborg", "date": "2019-09-03 14:45",
+         "category": "entertainment", "subtitle": "Hundreds of well-wishers had gathered outside the palace",
+         "topics": "Royals, Celebrities"},
+        {"title": "Woman robbed at knifepoint in Odense", "date": "2019-09-02 22:30",
+         "category": "crime", "subtitle": "The police are looking for two men who fled on foot",
+         "topics": "Crime, Robbery"},
+        {"title": "Recipe: the best apple cake of the autumn", "date": "2019-09-04 10:05",
+         "category": "consumer", "subtitle": "Our food editor shares her grandmother's recipe with crumble and cream",
+         "topics": "Food, Lifestyle"},
+    ],
+    "base": (
+        "Summary: The user reads football news: transfers and results from FC Copenhagen and Brøndby, the "
+        "Superliga, the national team and Christian Eriksen. Every article they read is in the sport section.\n"
+        "Reasoning: [2] is about FC Copenhagen's injury crisis before a match against Brøndby, the two clubs the "
+        "user follows most closely. [3] is about celebrities, which only touches the user's interest in famous "
+        "players. [4] is a crime story, [1] is about electricity prices and [5] is a recipe; none of them matches "
+        "what the user reads."
+    ),
+    "base_final": [2, 3, 4, 1, 5],
+    "fast": "The user reads football news about FC Copenhagen and Brøndby. [2] is the only football article among the candidates.",
+    "fast_final": [2, 3, 4, 1, 5],
+    "structural": (
+        "Step 1 - reasoning paths:\n"
+        "Path A (section: sport): all five history articles.\n"
+        "Path B (topic: Danish club football): FCK signing, Brøndby coach fired, Superliga result.\n"
+        "Path C (people: famous players): national team squad, Christian Eriksen.\n"
+        "Step 2 - match scores (A, B, C) for candidates matching at least one path:\n"
+        "[2] A=10, B=9, C=4\n"
+        "[3] A=0, B=0, C=2\n"
+        "[4] A=0, B=0, C=1\n"
+        "All other candidates score 0.\n"
+        "Step 3 - weights: A=0.40 (every history article is in the sport section), B=0.40 (three of five are about "
+        "Danish clubs), C=0.20 (two are about individual players).\n"
+        "Overall: [2]=8.40, [3]=0.40, [4]=0.20, [1]=0, [5]=0."
+    ),
+    "structural_final": [2, 3, 4, 1, 5],
+}
+
+NEWS_EXAMPLE_2 = {
+    "history": [
+        {"title": "Man charged with the murder of a 24-year-old in Aalborg", "date": "2019-02-11 10:02",
+         "category": "crime", "subtitle": "The 31-year-old denies the charge and has been remanded in custody for four weeks",
+         "topics": "Crime, Murder"},
+        {"title": "Gang conflict: police set up a stop-and-search zone in Copenhagen", "date": "2019-02-14 16:20",
+         "category": "crime", "subtitle": "The zone covers Nørrebro and Nordvest after two shootings in one week",
+         "topics": "Crime, Gangs"},
+        {"title": "Court: ten years in prison for armed robbery of a jeweller", "date": "2019-02-20 13:45",
+         "category": "crime", "subtitle": "The 27-year-old threatened the staff with a pistol and fled with watches",
+         "topics": "Crime, Courts"},
+        {"title": "Police warn of fake bank calls to the elderly", "date": "2019-02-25 08:30",
+         "category": "crime", "subtitle": "Fraudsters pretend to be from the bank and ask for card codes",
+         "topics": "Crime, Fraud"},
+        {"title": "Biker leader arrested at Copenhagen Airport", "date": "2019-03-01 19:10",
+         "category": "crime", "subtitle": "The 45-year-old was wanted for his role in a large drugs case",
+         "topics": "Crime, Gangs"},
+    ],
+    "candidates": [
+        {"title": "The new iPhone sold out within hours", "date": "2019-03-06 09:00",
+         "category": "consumer", "subtitle": "Customers queued outside the shops in central Copenhagen from early morning",
+         "topics": "Technology, Shopping"},
+        {"title": "Police: young man shot in the leg in Nørrebro", "date": "2019-03-04 23:40",
+         "category": "crime", "subtitle": "The police are investigating whether the shooting is linked to the gang conflict",
+         "topics": "Crime, Gangs"},
+        {"title": "Reality star reveals she is pregnant", "date": "2019-03-05 20:15",
+         "category": "entertainment", "subtitle": "The 26-year-old shared the news with her followers on Instagram",
+         "topics": "Celebrities, Reality TV"},
+        {"title": "Snow and frost on the way this weekend", "date": "2019-03-06 11:30",
+         "category": "news", "subtitle": "The Meteorological Institute expects down to minus eight degrees at night",
+         "topics": "Weather"},
+        {"title": "Handball: Denmark beat Norway in a thriller", "date": "2019-03-03 07:45",
+         "category": "sport", "subtitle": "The winning goal came with four seconds left on the clock",
+         "topics": "Sport, Handball"},
+    ],
+    "base": (
+        "Summary: The user reads crime news: murder and robbery cases, court verdicts, fraud warnings and above "
+        "all the gang conflict in Copenhagen, including the stop-and-search zone in Nørrebro.\n"
+        "Reasoning: [2] is a shooting in Nørrebro that may be linked to the gang conflict, which the user has "
+        "followed in several articles, so it fits both their section and their main story. [4] is general news "
+        "about the weather. [5] is sport, [3] is celebrity news and [1] is about a phone launch; the user reads "
+        "none of these kinds of articles."
+    ),
+    "base_final": [2, 4, 5, 3, 1],
+}
