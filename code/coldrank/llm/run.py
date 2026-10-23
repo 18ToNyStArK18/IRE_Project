@@ -32,7 +32,9 @@ def domain_of(cfg: dict) -> str:
     return cfg["prompt"].get("domain", "video_games")
 
 
-def run_listwise(engine, family: str, pools: list[dict], method: str, cfg: dict, max_len: int) -> tuple[list, list]:
+def run_listwise(engine, family: str, pools: list[dict], method: str, cfg: dict, max_len: int,
+                 mcfg: dict | None = None) -> tuple[list, list]:
+    mcfg = mcfg or {}
     pc = cfg["prompt"]
     hist_len = pc["history_len"][history_key(method)]
     count = lambda s, u, pf: engine.count_tokens(format_chat(family, s, u, pf))  # noqa: E731
@@ -41,7 +43,8 @@ def run_listwise(engine, family: str, pools: list[dict], method: str, cfg: dict,
     for p in pools:
         for s in range(pc["shuffles"]):
             r = render_listwise(p, method, s, hist_len, pc["top_n"], count, max_len,
-                                id_style=pc.get("id_style", "numbers"), domain=domain_of(cfg))
+                                id_style=pc.get("id_style", "numbers"), domain=domain_of(cfg),
+                                gen_cap=(mcfg.get("gen_cap") or {}).get(method))
             jobs.append((p, s, r))
     runnable = [j for j in jobs if j[2].max_new_tokens > 0]
     texts = engine.generate(
@@ -183,7 +186,7 @@ def run_task(engine, cfg: dict, mcfg: dict, model: str, method: str, condition: 
     elif method == "direct_sw":
         raw, preds = run_sliding(engine, mcfg["family"], pools, cfg, mcfg["max_model_len"])
     else:
-        raw, preds = run_listwise(engine, mcfg["family"], pools, method, cfg, mcfg["max_model_len"])
+        raw, preds = run_listwise(engine, mcfg["family"], pools, method, cfg, mcfg["max_model_len"], mcfg)
     write_jsonl(out / "raw.jsonl", raw)
     write_jsonl(out / "preds.jsonl", preds)
     summary = {"task": f"{condition}/{neg}/{method}/{split}", "pools": len(pools),
@@ -199,7 +202,7 @@ def run_task(engine, cfg: dict, mcfg: dict, model: str, method: str, condition: 
     return summary
 
 
-def verify_pointwise(engine, family: str, cfg: dict, n: int, tol: float = 0.05) -> float:
+def verify_pointwise(engine, family: str, cfg: dict, n: int, tol: float = 0.05, rel_tol: float = 0.005) -> float:
     """Compare the engine's fast yes_no() with yes_no_exact() on n real prompts from the
     first dev baseline pool; abort if they disagree."""
     pool = next(iter(read_jsonl(split_dir(cfg) / "pools" / "baseline_random_dev.jsonl")))
@@ -211,9 +214,13 @@ def verify_pointwise(engine, family: str, cfg: dict, n: int, tol: float = 0.05) 
     if len(pairs) < max(1, n // 2):
         raise SystemExit(f"only {len(pairs)}/{n} prompts had both Yes and No in the top-500: cannot verify")
     diff = max(abs(a - b) for a, b in pairs)
-    print(json.dumps({"verify_pointwise_max_abs_diff": diff}))
-    if diff > tol:
-        raise SystemExit(f"fast pointwise scores disagree with exact ones (max diff {diff:.4f} > {tol})")
+    # fp16 logits are rounded to steps that grow with their size (1/32 near 16), so the tolerance is
+    # absolute + relative: Llama-2's log-odds are ~+5 (diffs <= 0.02), Qwen2.5-32B's ~+13..+16 (0.0625)
+    excess = max(abs(a - b) - (tol + rel_tol * abs(b)) for a, b in pairs)
+    print(json.dumps({"verify_pointwise_max_abs_diff": diff, "max_excess_over_tolerance": excess}))
+    if excess > 0:
+        raise SystemExit(f"fast pointwise scores disagree with exact ones (max diff {diff:.4f}; "
+                         f"tolerance {tol} + {rel_tol} x |score|)")
     return diff
 
 
@@ -261,10 +268,14 @@ def main() -> None:
     ap.add_argument("--verify-pointwise", type=int, default=0,
                     help="before pointwise tasks, check fast vs exact scores on N prompts")
     ap.add_argument("--force", action="store_true", help="rerun tasks that already have a run_summary.json")
+    ap.add_argument("--tensor-parallel", type=int, default=None,
+                    help="override the model's vllm.tensor_parallel_size (e.g. 1 for qwen25_32b on one 32 GB GPU)")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
     mcfg = load_config("models")[args.model]
+    if args.tensor_parallel:  # same checkpoint, different GPU split: outputs and cache keys are unchanged
+        mcfg["vllm"] = {**(mcfg.get("vllm") or {}), "tensor_parallel_size": args.tensor_parallel}
     if args.jobs_file:
         jobs = read_jobs(args.jobs_file)
     elif args.method:

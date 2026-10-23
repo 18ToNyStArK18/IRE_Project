@@ -55,6 +55,24 @@ qwen_7b:
   listwise: true
   trust_remote_code: true      # Qwen v1 ships custom modeling/tokenizer code (needs `tiktoken`)
 
+# Li et al.'s own base model (Qwen-2.5-32B-Instruct, their Sec. 3.2), 4-bit AWQ, split across the
+# 4 GPUs of a node (tensor parallel). Released 2024: relaxes the 2023-only rule (team decision,
+# 2026-10-23; design.md). Context 8k instead of 4k: the reasoning prompts fit without trimming.
+qwen25_32b:
+  hf_id: Qwen/Qwen2.5-32B-Instruct-AWQ
+  revision: 5c7cb76a268fc6cfbb9c4777eb24ba6e27f9ee6c
+  quantization: awq
+  family: chatml
+  max_model_len: 8192
+  listwise: true
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 4
+  gen_cap:                    # output cap per method (default prompts.render.GEN_CAP, set for 4k models):
+    structural: 2048          # its reasoning ran out at 1,024 tokens in 25-40% of smoke outputs
+    structural_norecency: 2048
+    ssc: 2048
+
 # Local CPU smoke tests only (not a study model).
 smol_135m:
   hf_id: HuggingFaceTB/SmolLM2-135M-Instruct

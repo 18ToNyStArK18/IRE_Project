@@ -299,6 +299,7 @@ def render_listwise(
     cands: list[dict] | None = None,
     id_style: str = "numbers",
     domain: str = "video_games",
+    gen_cap: int | None = None,
 ) -> Rendered:
     """Render one listwise prompt. `count_tokens(system, user, prefill)` returns the
     token length of the fully formatted prompt; if given, the oldest history items
@@ -317,12 +318,12 @@ def render_listwise(
         user, prefill = _user_text(method, hist, cands, top_n, labels, dom)
         r = Rendered(dom.system, user, prefill, id_map, n_hist, code_map=code_map)
         if count_tokens is None:
-            r.max_new_tokens = GEN_CAP[method]
+            r.max_new_tokens = gen_cap or GEN_CAP[method]
             return r
         r.prompt_tokens = count_tokens(dom.system, user, prefill)
         room = max_model_len - r.prompt_tokens
         if room >= GEN_MIN[method] or n_hist <= MIN_HISTORY:
-            r.max_new_tokens = max(0, min(GEN_CAP[method], room))
+            r.max_new_tokens = max(0, min(gen_cap or GEN_CAP[method], room))
             r.overflow = room < GEN_MIN[method]
             return r
         n_hist -= 1
@@ -347,6 +348,7 @@ _BRACKET = re.compile(r"\[\s*(\d{1,3})\s*\]")
 
 
 _CODE = re.compile(r"\[\s*([A-Za-z]{2})\s*\]")
+_BARE_CODE = re.compile(r"\b([A-Z]{2})\b")  # only accepted after FINAL:, and only if it labels a candidate
 
 
 def parse_ranking(text: str, n_cands: int, code_map: dict[str, int] | None = None) -> tuple[list[int], str]:
@@ -354,9 +356,9 @@ def parse_ranking(text: str, n_cands: int, code_map: dict[str, int] | None = Non
 
     With `code_map` (letter codes), bracketed codes are mapped to positions; codes that
     label no candidate (e.g. copied from the worked example) are ignored.
-    Primary: the bracketed IDs after the LAST 'FINAL:'. Fallback: the last line with
-    at least two bracketed IDs. Returns (ids, mode) with mode in
-    {'final', 'fallback_line', 'fail'}.
+    Primary: the bracketed IDs after the LAST 'FINAL:' (with letter codes, bare codes
+    there too: mode 'final_bare'). Fallback: the last line with at least two bracketed
+    IDs. Returns (ids, mode) with mode in {'final', 'final_bare', 'fallback_line', 'fail'}.
     """
     pattern = _CODE if code_map else _BRACKET
 
@@ -375,6 +377,15 @@ def parse_ranking(text: str, n_cands: int, code_map: dict[str, int] | None = Non
         ids = ids_from(tail)
         if ids:
             return ids, "final"
+        if code_map:  # codes written without brackets ("FINAL: RB > DG > ..."; Qwen2.5-32B)
+            out, seen = [], set()
+            for m in _BARE_CODE.finditer(tail):
+                k = code_map.get(m.group(1).upper())
+                if k is not None and k <= n_cands and k not in seen:
+                    seen.add(k)
+                    out.append(k)
+            if out:
+                return out, "final_bare"
     for line in reversed(text.splitlines()):
         if len(pattern.findall(line)) >= 2:
             ids = ids_from(line)
