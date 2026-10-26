@@ -5,7 +5,8 @@ import pandas as pd
 import pytest
 
 from coldrank.adversarial.common import COLD_NEG, GOLD, WARM
-from coldrank.finetune.sft_data import is_holdout, pointwise_prompt, select_candidates
+from coldrank.common import load_config
+from coldrank.finetune.sft_data import is_holdout, pointwise_prompt, select_candidates, sft_paths
 from coldrank.finetune.trainpools import check_cutoffs, k15_pools, neg_setting, training_instances
 from coldrank.llm.chat import format_chat
 from coldrank.pools.build import Embeddings, build_pools, check_pool
@@ -130,3 +131,31 @@ def test_collate_left_pads_with_real_positions():
     assert b["position_ids"].tolist() == [[0, 1, 2], [0, 0, 1]]
     assert b["labels"].tolist() == [9, 8]
     assert torch.is_tensor(b["labels"])
+
+
+def test_answer_text_follows_the_chat_format():
+    pytest.importorskip("torch")
+    from coldrank.finetune.train import answer_text
+
+    assert [answer_text("llama2", lab) for lab in ("Yes", "No")] == [" Yes", " No"]   # after "[/INST]"
+    assert [answer_text("chatml", lab) for lab in ("Yes", "No")] == ["Yes", "No"]     # after "assistant\n"
+
+
+def test_sft_paths_per_model(tmp_path):
+    assert [p.name for p in sft_paths(tmp_path, "llama2_7b_fp16")] == ["sft_train.jsonl", "sft_val.jsonl", "sft_stats.json"]
+    qwen = sft_paths(tmp_path, "qwen25_7b")
+    assert [p.name for p in qwen] == ["sft_train_qwen25_7b.jsonl", "sft_val_qwen25_7b.jsonl", "sft_stats_qwen25_7b.json"]
+    assert not set(qwen) & set(sft_paths(tmp_path, "llama2_7b_fp16"))
+
+
+def test_qwen_finetune_configs_consistent():
+    models, fcfg = load_config("models"), load_config("finetune_qwen25_7b")
+    base, ft = models[fcfg["base_model"]], models["qwen25_7b_ft_ebnerd"]
+    assert fcfg["base_model"] == ft["base"] == "qwen25_7b"
+    assert base["dtype"] == ft["dtype"] == fcfg["quant"]["compute_dtype"] == "bfloat16"
+    assert base["family"] == ft["family"] == "chatml" and not base.get("quantization")
+    # train.py writes outputs/finetune/<dataset>/<base without _fp16>/adapter
+    assert ft["adapter"] == f"outputs/finetune/{load_config('ebnerd')['dataset']}/qwen25_7b/adapter"
+    # the Llama-2 fine-tuning config is unchanged
+    assert load_config("finetune")["base_model"] == "llama2_7b_fp16"
+    assert load_config("finetune")["quant"]["compute_dtype"] == "float16"

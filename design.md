@@ -431,3 +431,24 @@ Evidence: our Mistral runs (dev-direct job 20873, promptcheck job 21054) and the
 - **Rerun result (2026-10-26, pkgpu GPU 0, 1 h 10 min, status 0):** Structural R_hide went from 0.060 to 0.067 (random) and from 0.027 to 0.053 (hard). Δevidence (hard) changed from −0.040 [−0.060, −0.013], which was significant, to −0.013 [−0.047, +0.027], which is not. Δrecency changed from +0.013 to −0.013 (hard) and from +0.007 to +0.000 (random); neither is significant. So the pilot's "Structural is below chance without dates" came from the dated examples alone. Parse failures per prompt on A3 changed little, from 17–18% to 16%. Evaluation (pilot + fixed A1-ctrl + fixed A3): `outputs/pkgpu_a3fix_eval/`; outputs: `a3_fix_results.zip`.
 - **Both fixes merged into `main` (2026-10-26, fast-forward to `c0e8258`) after verification:** test suite 94 passed on the branch; rebuilding the K = 15 pools (`adversarial.resize`) in a scratch copy changes only `k15_a1ctrl_trap_{dev,test}.jsonl` for both datasets (Amazon 144 / 967, EB-NeRD 150 / 1,000 pools), and those differ from the old files only by `code_as`; A1-ctrl prompts now carry A1's letter codes in 432/432, 2,901/2,901, 450/450 and 3,000/3,000 (pool × shuffle) cases (old: 0 in each). Every Llama-2 K = 15 A2/A3 prompt (pointwise and Direct-Rec, dev and test, both datasets) renders byte-identically with the old and new code: **the Llama-2 A2/A3 results (Δrecency, swap sensitivity) and every pointwise result are unaffected**. Still to do: replace the A1-ctrl pool files with the rebuilt ones and rerun Llama-2 Direct-Rec on A1-ctrl (both datasets, dev + test) and Qwen2.5-32B Amazon dev on A1-ctrl (Direct-Rec, SSC, Structural) and A3 (Structural).
 - **Rebuild timing (team decision, 2026-10-26):** the K = 15 pools are rebuilt with the fix only **after** the fine-tuning experiment. Fine-tuning (training pools, training, `ft-dev` / `ft-test`) is pointwise-only, and pointwise prompts are byte-identical with the old and rebuilt A1-ctrl pools, so its results do not depend on the rebuild. The listwise A1-ctrl / A3 reruns follow the rebuild.
+
+### Fine-tuning Qwen2.5-7B on EB-NeRD (exploratory, 2026-10-26, branch `ft/qwen25-7b`; pending team decision)
+- **Scope:** Qwen2.5-7B-Instruct was released in Sept 2024, so it is **outside the 2023-only rule (§7)**. This is an exploratory second fine-tuned model next to Llama-2-7B, on pkgpu (one RTX 5000 Ada, 32 GB, bf16). It is not a study model until the team decides.
+- **Models (`configs/models.yaml`):**
+  - `qwen25_7b`: `Qwen/Qwen2.5-7B-Instruct` @ `a09a3545…`, full bf16 weights, ChatML, `max_model_len` 4096. It is the base and also the zero-shot reference with the same weights.
+  - `qwen25_7b_ft_ebnerd`: `base: qwen25_7b`, adapter `outputs/finetune/ebnerd/qwen25_7b/adapter`, TP 1.
+- **`dtype` per model** (optional): read by both engines and by `finetune.merge`. The default stays float16, so every existing model, cache key and merged Llama-2 model is unchanged. Qwen2.5 runs and merges in bfloat16, its training dtype.
+- **`configs/finetune_qwen25_7b.yaml`:** the same QLoRA values as `finetune.yaml`, except bf16 compute and one GPU with batch 8 × accumulation 4. The effective batch stays at 32, as for Llama-2. `train.py` sets `fp16` / `bf16` from the compute dtype.
+- **Answer token by chat format:** `train.answer_ids` used to probe with `"[/INST] Yes"`, which is Llama-2 specific. It now appends the label to the family's real prompt ending (`format_chat`):
+  - ChatML ends in `"assistant\n"`, so the label is the token `"Yes"` with no space.
+  - Llama-2 ends in `"[/INST]"`, so it stays `" Yes"`, the same token as before.
+  - In both cases the label must be one of the scorer's Yes / No ids.
+- **SFT files per model:** the prompts depend on the tokenizer, which sets the history trimming, and on the chat format. `sft_data.sft_paths` gives each model its own files: `sft_{train,val}_<model>.jsonl` and `sft_stats_<model>.json`. Llama-2 (`llama2_7b_fp16`) keeps the unsuffixed names the ADA scripts expect, so Qwen cannot overwrite Llama's data.
+- **Training pools:** the EB-NeRD training pools do not depend on the model, so the ones from ADA job 40042 (`finetune/train_pools_k15.jsonl`) are reused.
+- **Prerequisite on pkgpu:** install `peft 0.15.2`, `bitsandbytes 0.45.5` and `accelerate 1.6.0` into `/scratch/sriharinim/ire_venv`, with vllm 0.8.5, torch 2.6.0 and transformers 4.51.3 pinned. Set `COLDRANK_MERGED_DIR=/scratch/sriharinim/coldrank_merged`, because pkgpu has no `/ssd_scratch`.
+- **Planned run order (one fully free GPU):**
+  1. `python -m coldrank.finetune.sft_data --config ebnerd --model qwen25_7b`
+  2. A pilot: `python -m coldrank.finetune.train --config ebnerd --ft-config finetune_qwen25_7b --max-steps 60` (memory and speed).
+  3. 1 epoch.
+  4. Stage `ft-dev` (pointwise on the K = 15 baseline and variants) for `qwen25_7b` and `qwen25_7b_ft_ebnerd`.
+  5. The decomposition.

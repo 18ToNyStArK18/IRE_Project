@@ -55,6 +55,18 @@ qwen_7b:
   listwise: true
   trust_remote_code: true      # Qwen v1 ships custom modeling/tokenizer code (needs `tiktoken`)
 
+# Exploratory (pkgpu, 2026-10-23): released Sept 2024, so OUTSIDE the 2023-only model scope
+# (design.md Sec. 7); not a study model until the team decides.
+qwen25_7b:
+  hf_id: Qwen/Qwen2.5-7B-Instruct
+  revision: a09a35458c702b33eeacc393d103063234e8bc28
+  quantization: null           # full weights (~15 GB); pkgpu RTX 5000 Ada, 32 GB
+  dtype: bfloat16              # trained in bf16; the fp16 default is only for the 2080 Ti (no bf16)
+  family: chatml
+  max_model_len: 4096          # native 32k, capped for parity
+  listwise: true
+  trust_remote_code: false
+
 # Li et al.'s own base model (Qwen-2.5-32B-Instruct, their Sec. 3.2), 4-bit AWQ, split across the
 # 4 GPUs of a node (tensor parallel). Released 2024: relaxes the 2023-only rule (team decision,
 # 2026-10-23; design.md). Context 8k instead of 4k: the reasoning prompts fit without trimming.
@@ -118,3 +130,15 @@ llama2_7b_ft_ebnerd:
   trust_remote_code: false
   vllm:
     tensor_parallel_size: 2
+
+# Exploratory (pkgpu, one RTX 5000 Ada): Qwen2.5-7B fine-tuned on EB-NeRD; bf16 (15 GB) fits one GPU.
+qwen25_7b_ft_ebnerd:
+  base: qwen25_7b
+  adapter: outputs/finetune/ebnerd/qwen25_7b/adapter
+  dtype: bfloat16              # resolve_adapter keeps this entry's keys, so the base's dtype is repeated
+  family: chatml
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 1

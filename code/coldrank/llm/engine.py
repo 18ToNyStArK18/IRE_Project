@@ -59,7 +59,7 @@ class HFEngine:
         if self.tok.pad_token_id is None:
             self.tok.pad_token = self.tok.eos_token
         self.tok.padding_side = "left"
-        dtype = torch.float16 if self.device == "cuda" else torch.float32
+        dtype = getattr(torch, mcfg.get("dtype", "float16")) if self.device == "cuda" else torch.float32
         self.model = AutoModelForCausalLM.from_pretrained(mcfg["hf_id"], torch_dtype=dtype, **kw).to(self.device)
         self.model.eval()
         self.bs = batch_size
@@ -111,7 +111,7 @@ class VLLMEngine:
             revision=mcfg["revision"],
             tokenizer_revision=mcfg["revision"],
             quantization=mcfg.get("quantization"),
-            dtype="float16",  # 2080 Ti (sm_75) has no bf16
+            dtype=mcfg.get("dtype", "float16"),  # default: 2080 Ti (sm_75) has no bf16
             max_model_len=mcfg["max_model_len"],
             trust_remote_code=mcfg.get("trust_remote_code", False),
             enable_prefix_caching=True,

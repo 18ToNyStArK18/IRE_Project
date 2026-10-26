@@ -1,4 +1,5 @@
-"""Merge a LoRA adapter into its fp16 base so vLLM loads the fine-tuned model like any other.
+"""Merge a LoRA adapter into its base (in the base's dtype, fp16 by default) so vLLM loads the
+fine-tuned model like any other.
 
 A models.yaml entry with `base` and `adapter` is resolved here (called by llm.run): the merged
 weights go to node-local disk (13.5 GB per model; $COLDRANK_MERGED_DIR, default
@@ -47,7 +48,8 @@ def merge(base: dict, adapter_dir: Path, target: Path) -> None:
 
     tmp = target.with_name(target.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
-    model = AutoModelForCausalLM.from_pretrained(base["hf_id"], revision=base["revision"], torch_dtype=torch.float16)
+    model = AutoModelForCausalLM.from_pretrained(base["hf_id"], revision=base["revision"],
+                                                 torch_dtype=getattr(torch, base.get("dtype", "float16")))
     model = PeftModel.from_pretrained(model, str(adapter_dir)).merge_and_unload()
     model.save_pretrained(tmp, safe_serialization=True)
     AutoTokenizer.from_pretrained(base["hf_id"], revision=base["revision"]).save_pretrained(tmp)

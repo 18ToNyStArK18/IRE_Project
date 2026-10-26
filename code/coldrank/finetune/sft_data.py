@@ -6,7 +6,8 @@ candidates (seeded) ("No"). The prompt is built exactly as at inference (`llm.ru
 items dropped until the prompt fits the context with one answer token. Users are split into
 train / validation (`finetune.holdout_frac`, seeded by user id).
 
-Outputs (in <split dir>/finetune/): sft_train.jsonl, sft_val.jsonl, sft_stats.json
+Outputs (in <split dir>/finetune/): sft_train.jsonl, sft_val.jsonl, sft_stats.json for Llama-2
+(`llama2_7b_fp16`); sft_{train,val}_<model>.jsonl, sft_stats_<model>.json for any other model
 
 Usage:
     python -m coldrank.finetune.sft_data --config amazon_vg --model llama2_7b_fp16
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 import numpy as np
 
@@ -25,6 +27,16 @@ from coldrank.finetune.trainpools import ft_dir
 from coldrank.llm.chat import format_chat
 from coldrank.llm.run import domain_of
 from coldrank.prompts.render import render_pointwise
+
+
+LEGACY_MODEL = "llama2_7b_fp16"  # its files keep the unsuffixed names the ADA scripts expect
+
+
+def sft_paths(fd: Path, model: str) -> tuple[Path, Path, Path]:
+    """(train, val, stats) files of a model's SFT examples; the prompts depend on the model's
+    tokenizer and chat format, so every model has its own files."""
+    sfx = "" if model == LEGACY_MODEL else f"_{model}"
+    return fd / f"sft_train{sfx}.jsonl", fd / f"sft_val{sfx}.jsonl", fd / f"sft_stats{sfx}.json"
 
 
 def select_candidates(pool: dict, n_warm: int) -> list[dict]:
@@ -81,8 +93,9 @@ def main() -> None:
     frac = float(cfg["finetune"]["holdout_frac"])
     val = [r for r in rows if is_holdout(r["user_id"], frac)]
     train = [r for r in rows if not is_holdout(r["user_id"], frac)]
-    write_jsonl(fd / "sft_train.jsonl", train)
-    write_jsonl(fd / "sft_val.jsonl", val)
+    train_path, val_path, stats_path = sft_paths(fd, args.model)
+    write_jsonl(train_path, train)
+    write_jsonl(val_path, val)
     lens = np.array([count(r["prompt"]) for r in rows])
     stats = {
         "model": args.model, "n_pools": len(pools), "n_train": len(train), "n_val": len(val),
@@ -93,7 +106,7 @@ def main() -> None:
                           "p95": float(np.percentile(lens, 95)), "max": int(lens.max()), "total": int(lens.sum())},
         "history_trimmed": sum(r["trimmed"] for r in rows),
     }
-    (fd / "sft_stats.json").write_text(json.dumps(stats, indent=2))
+    stats_path.write_text(json.dumps(stats, indent=2))
     print(json.dumps(stats, indent=2))
 
 

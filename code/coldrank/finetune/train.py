@@ -8,6 +8,7 @@ is computed as if unpadded and only the last position's logits are materialized.
 
 Run with torchrun (one model copy per GPU):
     torchrun --nproc_per_node 4 -m coldrank.finetune.train --config amazon_vg
+    python -m coldrank.finetune.train --config ebnerd --ft-config finetune_qwen25_7b   # one GPU
 Output: outputs/finetune/<dataset>/<base>/ (adapter/, checkpoints/, train_summary.json)
 """
 
@@ -23,18 +24,26 @@ import torch
 import torch.nn.functional as F
 
 from coldrank.common import OUT_DIR, load_config, read_jsonl
+from coldrank.finetune.sft_data import sft_paths
 from coldrank.finetune.trainpools import ft_dir
+from coldrank.llm.chat import format_chat
 from coldrank.llm.engine import NO_SPELLINGS, YES_SPELLINGS, answer_token_ids
 
 
-def answer_ids(tok) -> dict[str, int]:
+def answer_text(family: str, label: str) -> str:
+    """The label as the model writes it right after the prompt: after a newline (ChatML's
+    "assistant\n") with no leading space, otherwise (Llama-2's "[/INST]") with one."""
+    return label if format_chat(family, "S", "U").endswith("\n") else f" {label}"
+
+
+def answer_ids(tok, family: str) -> dict[str, int]:
     """The single token the model would emit for each label right after the prompt. It must be
     one of the scorer's Yes / No token ids (llm.engine.answer_token_ids)."""
     out = {}
-    probe = "[/INST]"
+    probe = format_chat(family, "S", "U")
     base = tok(probe, add_special_tokens=False)["input_ids"]
     for label, spellings in (("Yes", YES_SPELLINGS), ("No", NO_SPELLINGS)):
-        ids = tok(f"{probe} {label}", add_special_tokens=False)["input_ids"]
+        ids = tok(probe + answer_text(family, label), add_special_tokens=False)["input_ids"]
         assert ids[: len(base)] == base and len(ids) == len(base) + 1, (label, ids)
         assert ids[-1] in answer_token_ids(tok, spellings), (label, ids[-1])
         out[label] = ids[-1]
@@ -93,10 +102,10 @@ def main() -> None:
 
     tok = AutoTokenizer.from_pretrained(mcfg["hf_id"], revision=mcfg["revision"])
     pad_id = tok.unk_token_id if tok.pad_token_id is None else tok.pad_token_id
-    ans = answer_ids(tok)
-    fd = ft_dir(cfg)
-    train_rows = list(read_jsonl(fd / "sft_train.jsonl"))[: args.limit]
-    val_rows = list(read_jsonl(fd / "sft_val.jsonl"))
+    ans = answer_ids(tok, mcfg["family"])
+    train_path, val_path, _ = sft_paths(ft_dir(cfg), base_key)
+    train_rows = list(read_jsonl(train_path))[: args.limit]
+    val_rows = list(read_jsonl(val_path))
     train_ds, val_ds = PromptDataset(train_rows, tok, ans), PromptDataset(val_rows, tok, ans)
 
     dtype = getattr(torch, qc["compute_dtype"])
@@ -125,7 +134,7 @@ def main() -> None:
         per_device_train_batch_size=tc["per_device_batch"], per_device_eval_batch_size=tc["per_device_batch"],
         gradient_accumulation_steps=tc["grad_accum"], learning_rate=tc["lr"], lr_scheduler_type=tc["scheduler"],
         warmup_ratio=tc["warmup_ratio"], weight_decay=tc["weight_decay"], max_grad_norm=tc["max_grad_norm"],
-        fp16=True, gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False},
+        fp16=dtype == torch.float16, bf16=dtype == torch.bfloat16, gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False},
         logging_steps=tc["logging_steps"], eval_strategy="steps", eval_steps=tc["eval_steps"],
         save_strategy="steps", save_steps=tc["save_steps"], save_total_limit=2, seed=tc["seed"],
         data_seed=tc["seed"], group_by_length=True, remove_unused_columns=False, prediction_loss_only=True,
