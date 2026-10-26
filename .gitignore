@@ -22,6 +22,9 @@ venv/
 /data/
 /outputs/
 
+# Archives (results / pool handoffs; shared directly, never committed)
+*.zip
+
 # ADA cluster scripts (machine/account-specific; kept locally, not in git)
 code/scripts/*.sbatch
 code/scripts/ada_*.sh
