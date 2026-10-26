@@ -81,6 +81,18 @@ def test_hidden_dates_are_omitted():
     assert "(each item: title | category)" in cand_part
 
 
+@pytest.mark.parametrize("method", ["base", "fast", "structural", "structural_norecency"])
+def test_hidden_dates_also_hidden_in_examples(method):
+    # A3 hides every date of the task; the worked examples must not show theirs (dates of EXAMPLE_1/2)
+    pool = make_pool()
+    shown = render_listwise(pool, method, 0, 20, 10, id_style="codes").user
+    assert "2017-03-03" in shown and "launch date" in shown
+    for it in pool["candidates"] + pool["history"]:
+        it["date"] = None
+    hidden = render_listwise(pool, method, 0, 20, 10, id_style="codes").user
+    assert not re.search(r"\b(19|20)\d\d-\d\d-\d\d\b", hidden) and "launch date" not in hidden
+
+
 def test_history_trimmed_to_fit():
     pool = make_pool(n_hist=40)
     count = lambda s, u, pf: len((s + u + pf).split()) * 2  # noqa: E731  (fake tokenizer)

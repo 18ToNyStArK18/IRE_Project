@@ -107,8 +107,8 @@ def build_oldgold(instances: list[dict], topk: dict[str, list[str]], items: pd.D
         ctrl = derive(a1, "a1ctrl")
         ctrl["pool_id"] = f"{iid}__{NEG}__a1ctrl"
         fill_iter = iter(fill)
-        ctrl["candidates"] = [rec(next(fill_iter), CTRL_FILL) if c["role"] == TRAP else c
-                              for c in ctrl["candidates"]]
+        ctrl["candidates"] = [dict(rec(next(fill_iter), CTRL_FILL), code_as=c["item_id"]) if c["role"] == TRAP else c
+                              for c in ctrl["candidates"]]  # code_as: A1's letter code per slot
         out["a1ctrl"].append(annotate(ctrl))
 
         # A5: relabel the n least similar warm negatives (nested in n)

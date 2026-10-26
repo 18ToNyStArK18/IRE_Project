@@ -100,6 +100,7 @@ def a1ctrl_from(a1: dict, fill: list[dict]) -> dict:
         if c["role"] == TRAP:
             f = copy.deepcopy(next(it))
             f["role"] = CTRL_FILL
+            f["code_as"] = c["item_id"]  # prompt letter code of the trap it replaces (render.candidate_codes)
             new.append(f)
         else:
             new.append(c)

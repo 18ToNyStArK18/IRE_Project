@@ -14,7 +14,7 @@ from coldrank.baselines.heuristics import HEURISTICS
 from coldrank.common import pool_files, ts_to_date
 from coldrank.eval.metrics import pool_metrics
 from coldrank.pools.build import Embeddings, build_pools
-from coldrank.prompts.render import render_listwise, shuffled_candidates
+from coldrank.prompts.render import candidate_codes, render_listwise, shuffled_candidates
 
 DAY = 86400
 T = 1_000 * DAY
@@ -103,6 +103,10 @@ def test_oldgold_family(world):
             for k, c in enumerate(shuffled_candidates(q, s)):
                 if c["item_id"] in pos_a1:
                     assert pos_a1[c["item_id"]] == k
+        # ... and A1's letter codes slot by slot, the fill items taking their trap's code
+        codes_a1 = candidate_codes(a1.get("shuffle_key", a1["pool_id"]), s, shuffled_candidates(a1, s))
+        for q in (fam["a1ctrl"][0], fam["a5_n5"][0]):
+            assert candidate_codes(q["shuffle_key"], s, shuffled_candidates(q, s)) == codes_a1
     st = manipulation_stats("a1_oldgold", fam["a1_oldgold"])
     assert st["trap_minus_gold_age_days_median"] > 0 and st["new_dated_per_pool"] == 10
 

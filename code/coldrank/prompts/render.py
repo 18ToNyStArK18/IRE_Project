@@ -97,8 +97,10 @@ EXAMPLE_CODES = ["AE", "IO", "UA", "EO", "OI"]
 
 
 def candidate_codes(key: str, shuffle: int, cands: list[dict]) -> list[str]:
+    """Codes seeded by the candidates' ids. `code_as` (set on A1-ctrl's fill items: the id of the
+    A1 trap they replace) stands in for the id, so A1-ctrl gets A1's codes slot by slot."""
     pairs = [a + b for a in CODE_LETTERS for b in CODE_LETTERS if a != b]
-    return rng_for("codes", key, shuffle, [c["item_id"] for c in cands]).sample(pairs, len(cands))
+    return rng_for("codes", key, shuffle, [c.get("code_as", c["item_id"]) for c in cands]).sample(pairs, len(cands))
 
 
 def candidate_block(cands: list[dict], brand: bool, dom: "Domain", labels: list[str] | None = None) -> str:
@@ -190,15 +192,20 @@ NEWS = Domain(
 DOMAINS = {"video_games": VIDEO_GAMES, "news": NEWS}
 
 
-def _example_block(ex: dict, kind: str, brand: bool, dom: Domain, codes: bool = False) -> str:
+def _example_block(ex: dict, kind: str, brand: bool, dom: Domain, codes: bool = False, dates: bool = True) -> str:
+    """dates=False (the task shows no dates, condition A3): the example's dates are hidden too.
+    The example reasoning never mentions dates, so it stays valid."""
     reasoning = ex[kind]
     final = ex[f"{kind}_final"]
     labels = EXAMPLE_CODES[: len(ex["candidates"])] if codes else None
     if codes:  # the example reasoning refers to candidates as [k]; rewrite to the example codes
         for k, lab in enumerate(labels, 1):
             reasoning = reasoning.replace(f"[{k}]", f"[{lab}]")
+    hist, cands = ex["history"], ex["candidates"]
+    if not dates:
+        hist, cands = [dict(h, date=None) for h in hist], [dict(c, date=None) for c in cands]
     return (
-        f"{history_block(ex['history'], brand, dom)}\n\n{candidate_block(ex['candidates'], brand, dom, labels)}\n\n"
+        f"{history_block(hist, brand, dom)}\n\n{candidate_block(cands, brand, dom, labels)}\n\n"
         f"Answer:\n{reasoning}\n{final_line(final, labels)}"
     )
 
@@ -209,6 +216,7 @@ def _user_text(method: str, hist: list[dict], cands: list[dict], n: int,
     (id_style: codes) or None for numbered IDs."""
     brand = method.startswith("structural")
     codes = labels is not None
+    dates = any(it.get("date") for it in hist + cands)  # False in A3: the worked examples hide theirs too
     task = f"{history_block(hist, brand, dom)}\n\n{candidate_block(cands, brand, dom, labels)}"
     if codes and method in ("direct", "direct_v2", "direct_sw"):
         # teammates' frozen `direct_codes_free`: letter codes, no prefill
@@ -239,7 +247,7 @@ def _user_text(method: str, hist: list[dict], cands: list[dict], n: int,
     if method in ("base", "fast"):
         exs = list(dom.examples) if method == "base" else [dom.examples[0]]
         kind = "base" if method == "base" else "fast"
-        demo = "\n\n".join(f"Example {k}:\n{_example_block(ex, kind, False, dom, codes)}" for k, ex in enumerate(exs, 1))
+        demo = "\n\n".join(f"Example {k}:\n{_example_block(ex, kind, False, dom, codes, dates)}" for k, ex in enumerate(exs, 1))
         how = (
             "First, summarize the user's interests in two or three sentences. Then reason about which "
             "candidates fit these interests best."
@@ -254,7 +262,7 @@ def _user_text(method: str, hist: list[dict], cands: list[dict], n: int,
     if method in ("structural", "structural_norecency"):
         recency = ", the kind of interaction, and how recent it is" if method == "structural" else ""
         steps = SR_STEPS.format(recency=recency, factors=dom.sr_factors)
-        demo = _example_block(dom.examples[0], "structural", True, dom, codes)
+        demo = _example_block(dom.examples[0], "structural", True, dom, codes, dates)
         return (
             f"Here is a worked example of the task.\n\nExample:\n{demo}\n\nNow the actual task.\n\n{task}\n\n"
             f"{steps} {format_instruction(n, dom, codes)}",

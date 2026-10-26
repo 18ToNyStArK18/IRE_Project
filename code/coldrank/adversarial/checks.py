@@ -89,6 +89,7 @@ def check_a1ctrl(p: dict, a1: dict, n_fill: int) -> None:
     for a, b in zip(p["candidates"], a1["candidates"]):
         if b["role"] == TRAP:
             assert a["role"] == CTRL_FILL, p["pool_id"]
+            assert a.get("code_as", b["item_id"]) == b["item_id"], p["pool_id"]
         else:
             assert a == b, p["pool_id"]
 
