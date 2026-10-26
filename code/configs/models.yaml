@@ -82,3 +82,39 @@ smol_135m:
   max_model_len: 4096
   listwise: true
   trust_remote_code: false
+
+# --- fine-tuning experiment (design.md "Fine-tuning experiment") ---
+# Full-precision Llama-2-7B-Chat: the base for QLoRA, and the zero-shot reference with the same
+# weights as the fine-tuned models. fp16 (13.5 GB) needs 2 GPUs of 11 GB.
+llama2_7b_fp16:
+  hf_id: meta-llama/Llama-2-7b-chat-hf
+  revision: f5db02db724555f92da89c216ac04704f23d4590
+  allow_patterns: ["*.json", "*.safetensors", "tokenizer.model"]   # the repo also has .bin copies (13.5 GB more)
+  quantization: null
+  family: llama2
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 2
+
+# Fine-tuned models: the LoRA adapter is merged into `base` before loading (coldrank.finetune.merge).
+llama2_7b_ft_amazon_vg:
+  base: llama2_7b_fp16
+  adapter: outputs/finetune/amazon_vg/llama2_7b/adapter   # relative to the project directory
+  family: llama2
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 2
+
+llama2_7b_ft_ebnerd:
+  base: llama2_7b_fp16
+  adapter: outputs/finetune/ebnerd/llama2_7b/adapter
+  family: llama2
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 2

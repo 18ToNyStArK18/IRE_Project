@@ -59,3 +59,11 @@ adversarial:
   trap_quantile: 0.25     # unused with trap_source: inview
   ctrl_fill: 3            # A1-ctrl refills the 3 trap slots
   flood_ns: [1, 2, 5, 10]
+
+# --- fine-tuning data (coldrank.finetune; design.md "Fine-tuning experiment") ---
+finetune:
+  # one-day windows every third day, ending before cutoff_T; each cutoff gets its own SASRec
+  cutoffs: ["2023-05-06", "2023-05-09", "2023-05-12", "2023-05-15", "2023-05-18", "2023-05-21", "2023-05-24"]
+  max_instances_per_cutoff: 750    # 6,000-8,700 feasible per day; 5,250 in total
+  warm_per_pool: 3
+  holdout_frac: 0.05

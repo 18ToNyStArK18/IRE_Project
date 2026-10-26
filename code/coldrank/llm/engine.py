@@ -176,7 +176,9 @@ class CachedEngine:
         # file (especially on a network filesystem) can interleave and lose entries.
         self.path = Path(cache_dir) / (f"{model_key}__{cache_tag}.jsonl" if cache_tag else f"{model_key}.jsonl")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.ident = (model_key, engine.cfg["hf_id"], engine.cfg["revision"], engine.cfg.get("quantization"))
+        # a merged fine-tuned model is identified by base + adapter hash (ident_hf_id), not its local path
+        self.ident = (model_key, engine.cfg.get("ident_hf_id", engine.cfg["hf_id"]), engine.cfg["revision"],
+                      engine.cfg.get("quantization"))
         self.mem: dict[str, object] = {}
         self._lock = threading.Lock()
         if self.path.exists():

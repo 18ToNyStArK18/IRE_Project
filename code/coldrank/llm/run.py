@@ -274,6 +274,10 @@ def main() -> None:
 
     cfg = load_config(args.config)
     mcfg = load_config("models")[args.model]
+    if mcfg.get("adapter"):  # fine-tuned model: merge the LoRA adapter into its fp16 base first
+        from coldrank.finetune.merge import resolve_adapter
+
+        mcfg = resolve_adapter(mcfg)
     if args.tensor_parallel:  # same checkpoint, different GPU split: outputs and cache keys are unchanged
         mcfg["vllm"] = {**(mcfg.get("vllm") or {}), "tensor_parallel_size": args.tensor_parallel}
     if args.jobs_file:

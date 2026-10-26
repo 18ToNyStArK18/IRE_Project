@@ -19,5 +19,5 @@ STUDY = ["llama2_7b", "mistral_7b", "qwen_7b", "llama2_13b", "phi2"]
 
 for key in sys.argv[1:] or STUDY:
     m = CFG[key]
-    path = snapshot_download(m["hf_id"], revision=m["revision"])
+    path = snapshot_download(m["hf_id"], revision=m["revision"], allow_patterns=m.get("allow_patterns"))
     print(f"{key:12s} {m['hf_id']} @ {m['revision'][:10]} -> {path}")

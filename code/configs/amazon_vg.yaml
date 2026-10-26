@@ -49,3 +49,12 @@ adversarial:
   trap_quantile: 0.25    # traps: similarity to the user profile <= this quantile of the eligible new items
   ctrl_fill: 10          # A1-ctrl: trap slots refilled with SASRec warm ranks 40-49
   flood_ns: [1, 2, 5, 10]  # A5: number of warm negatives relabeled with new dates
+
+# --- fine-tuning data (coldrank.finetune; design.md "Fine-tuning experiment") ---
+finetune:
+  # earlier cutoffs T' with the test window length: every window ends before cutoff_T and
+  # windows do not overlap (2021-09-01 + 180 days = 2022-02-28)
+  cutoffs: ["2019-09-01", "2020-03-01", "2020-09-01", "2021-03-01", "2021-09-01", "2022-03-01"]
+  max_instances_per_cutoff: null   # all (4,186 instances before the pool step)
+  warm_per_pool: 3                 # SFT examples per pool: gold + 2 cold negatives + 3 of the 12 warm
+  holdout_frac: 0.05               # users held out for the validation loss
