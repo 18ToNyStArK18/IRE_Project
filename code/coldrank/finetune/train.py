@@ -116,6 +116,13 @@ def main() -> None:
         model.print_trainable_parameters()
 
     class LastTokenTrainer(Trainer):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            # compute_loss returns a per-batch mean, so the Trainer must divide by the accumulation
+            # steps itself; it skips that when the model's forward takes **kwargs (transformers 4.51),
+            # which doubled the logged loss and the gradients in the pilot (job 40089)
+            self.model_accepts_loss_kwargs = False
+
         def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
             loss = last_token_loss(model, inputs)
             return (loss, {"loss": loss}) if return_outputs else loss
