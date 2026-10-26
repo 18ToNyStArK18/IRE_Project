@@ -1,0 +1,25 @@
+# Results
+
+Running log of results, newest sections appended at the end. Setup and decisions: `design.md`.
+
+## Llama-2-7B fine-tuned on Amazon Video Games — dev set (2026-10-26)
+
+**Model.** Llama-2-7B-Chat (`meta-llama/Llama-2-7b-chat-hf` @ `f5db02db…`, fp16), **fine-tuned on Amazon Video Games** with QLoRA (4-bit, 1 epoch, pointwise Yes/No, dates shown as in production; 23,778 training examples from 4,183 pools at 6 earlier cutoffs; job 40143). **Zero-shot** = the same fp16 weights without fine-tuning (job 40931); fine-tuned evaluation: job 40930.
+
+**Evaluation.** Amazon VG dev, K = 15 candidates, pointwise scoring. 150 users per cold-target cell (Baseline, A2–A6), 144 per old-target cell (A1-ctrl, A1, A5). Recall@1 as random / hard negatives; chance = 1/15 = 0.067. **Change** = the fine-tuned model's paired change against the reference row (Baseline for A2–A6, A1-ctrl for A1/A5); \* = McNemar p < 0.05. The A5 pools also contain A1's 3 traps.
+
+| Ablation | What it does | Recall@1, zero-shot | Recall@1, fine-tuned | Change (fine-tuned) | What the change means |
+|---|---|---|---|---|---|
+| Baseline | Li et al.'s protocol: correct item is new; dates shown | 0.080 / 0.060 | 0.373 / 0.460 | +0.293\* / +0.400\* vs zero-shot | Fine-tuning works: 5–7× chance, above the newest-first rule (0.347 / 0.307) |
+| A2 Swap | correct item's date swapped with an old wrong item's | 0.080 / 0.053 | 0.007 / 0.007 | −0.367\* / −0.453\* | Accuracy follows the date, not the item: almost all of it moves with the "new" date |
+| A3 Hide | all dates removed | 0.073 / 0.073 | 0.093 / 0.087 | −0.280\* / −0.373\* | Without dates it falls to about chance (Δrecency). This overstates the recency share somewhat, because the model never saw date-less prompts (dates-hidden control planned for later). |
+| A4 Shuffle | dates randomly reassigned among candidates | 0.067 / 0.060 | 0.093 / 0.060 | −0.280\* / −0.400\* | Wrong dates break it as badly as no dates: the dates drive its ranking |
+| A6 All-new | all 15 candidates are new items | 0.067 / 0.067 | 0.240 / 0.280 | −0.133\* / −0.180\* | Still 4× chance when dates can't separate the items, so it did learn some content; but it loses a third of its accuracy without the "only the gold is new" cue |
+| A1-ctrl (old-target reference) | correct item is old; nothing new-looking | 0.146 | 0.389 | — | Reference for the rows below |
+| A1 Traps | correct item old + 3 new irrelevant items | 0.118 | 0.139 | −0.250\* | New-looking irrelevant items steal the top spot: it picks a trap first 53% of the time (chance 20%) |
+| A5 Flood, n = 1 | A1 + 1 old wrong item relabelled with a new date | 0.111 | 0.125 | −0.264\* | Even one fake "new" date hurts |
+| A5 Flood, n = 2 | A1 + 2 relabelled | 0.104 | 0.083 | −0.306\* | Damage grows with the number of new-looking items … |
+| A5 Flood, n = 5 | A1 + 5 relabelled | 0.118 | 0.062 | −0.326\* | … |
+| A5 Flood, n = 10 | A1 + 10 relabelled | 0.104 | 0.042 | −0.347\* | … to below chance: simply labelling items "new" is enough to bury the correct one |
+
+**Summary.** Before fine-tuning, Llama-2-7B (fp16) is at chance and does not react to dates (no zero-shot change is significant). After fine-tuning on Amazon VG with Li et al.'s protocol it is accurate (0.37–0.46), but every manipulation of dates destroys that accuracy: it learned some relevance (A6), but mostly to pick whatever looks newest — the recency shortcut. Dev results; test (jobs 41008 / 41009) pending.

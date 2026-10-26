@@ -86,6 +86,8 @@ def main() -> None:
     base_key = fcfg["base_model"]
     mcfg = load_config("models")[base_key]
     tc, lc, qc = fcfg["train"], fcfg["lora"], fcfg["quant"]
+    tc = {**tc, **(cfg["finetune"].get("train_overrides") or {})}  # per-dataset batch shape (same effective batch)
+    fcfg = {**fcfg, "train": tc}  # recorded in train_summary.json as used
     out = OUT_DIR / "finetune" / cfg["dataset"] / base_key.replace("_fp16", "")
     if args.max_steps > 0 or args.limit:
         out = out.parent / f"{out.name}_pilot"  # never mistake a pilot for the real adapter
