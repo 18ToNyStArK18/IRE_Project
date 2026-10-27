@@ -95,6 +95,8 @@ def main() -> None:
     base_key = fcfg["base_model"]
     mcfg = load_config("models")[base_key]
     tc, lc, qc = fcfg["train"], fcfg["lora"], fcfg["quant"]
+    tc = {**tc, **(cfg["finetune"].get("train_overrides") or {})}  # per-dataset batch shape (same effective batch)
+    fcfg = {**fcfg, "train": tc}  # recorded in train_summary.json as used
     out = OUT_DIR / "finetune" / cfg["dataset"] / base_key.replace("_fp16", "")
     if args.max_steps > 0 or args.limit:
         out = out.parent / f"{out.name}_pilot"  # never mistake a pilot for the real adapter
@@ -125,6 +127,13 @@ def main() -> None:
         model.print_trainable_parameters()
 
     class LastTokenTrainer(Trainer):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            # compute_loss returns a per-batch mean, so the Trainer must divide by the accumulation
+            # steps itself; it skips that when the model's forward takes **kwargs (transformers 4.51),
+            # which doubled the logged loss and the gradients in the pilot (job 40089)
+            self.model_accepts_loss_kwargs = False
+
         def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
             loss = last_token_loss(model, inputs)
             return (loss, {"loss": loss}) if return_outputs else loss

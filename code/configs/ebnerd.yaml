@@ -67,3 +67,6 @@ finetune:
   max_instances_per_cutoff: 750    # 6,000-8,700 feasible per day; 5,250 in total
   warm_per_pool: 3
   holdout_frac: 0.05
+  # news prompts average 1,243 tokens (Amazon 524): batch 4 ran out of GPU memory (job 40530), so
+  # 2 per GPU x 4 accumulation steps keeps the effective batch at 32 (configs/finetune.yaml)
+  train_overrides: {per_device_batch: 2, grad_accum: 4}
