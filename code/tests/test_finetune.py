@@ -6,10 +6,12 @@ import pytest
 
 from coldrank.adversarial.common import COLD_NEG, GOLD, WARM
 from coldrank.common import load_config
-from coldrank.finetune.sft_data import is_holdout, pointwise_prompt, select_candidates, sft_paths
+from coldrank.finetune.impressions import IMP_NEG, attach_negatives, date_cue, imp_cfg
+from coldrank.finetune.impressions import build_examples as build_imp_examples
+from coldrank.finetune.sft_data import is_holdout, pointwise_prompt, select_candidates, sft_dir, sft_paths
 from coldrank.finetune.trainpools import check_cutoffs, k15_pools, neg_setting, training_instances
 from coldrank.llm.chat import format_chat
-from coldrank.pools.build import Embeddings, build_pools, check_pool
+from coldrank.pools.build import Embeddings, build_pools, candidate_record, check_pool, history_records
 from coldrank.prompts.render import render_pointwise
 from tests.test_split import T, _world
 
@@ -159,3 +161,102 @@ def test_qwen_finetune_configs_consistent():
     # the Llama-2 fine-tuning config is unchanged
     assert load_config("finetune")["base_model"] == "llama2_7b_fp16"
     assert load_config("finetune")["quant"]["compute_dtype"] == "float16"
+
+
+def test_sft_paths_variant_never_collides(tmp_path):
+    imp = sft_paths(tmp_path, "llama2_7b_fp16", "imp")
+    assert [p.name for p in imp] == ["sft_train_llama2_7b_fp16_imp.jsonl", "sft_val_llama2_7b_fp16_imp.jsonl",
+                                     "sft_stats_llama2_7b_fp16_imp.json"]
+    assert not set(imp) & set(sft_paths(tmp_path, "llama2_7b_fp16"))
+    assert sft_paths(tmp_path, "qwen25_7b", "imp")[0].name == "sft_train_qwen25_7b_imp.jsonl"
+    with pytest.raises(ValueError):
+        sft_dir({"dataset": "x", "cutoff_T": "2023-05-25", "window_days": 1}, "bogus")
+
+
+def _imp_world():
+    """_world50 plus impressions: the gold c20 clicked at the target time next to shown articles."""
+    items, emb, inst, topk = _world50(3)
+    r = inst[0]
+    ts = r["target_ts"]
+    imp = pd.DataFrame([
+        # the gold's impression: c21 also clicked (a positive), w60 in the history, zz unknown,
+        # c25 launched after the target time (T + 26 h > T + 25 h)
+        {"user_id": "u0", "ts": ts, "inview": ["c20", "c21", "c22", "c25", "w00", "w60", "zz"], "clicked": ["c20", "c21"]},
+        # another impression of u0 at another time: never a source of negatives
+        {"user_id": "u0", "ts": ts - 600, "inview": ["c23", "c24"], "clicked": []},
+        # u1 clicked something else at the target time: no gold impression
+        {"user_id": "u1", "ts": ts, "inview": ["c20", "c26"], "clicked": ["c26"]},
+        # u2: the gold's impression shows nothing else
+        {"user_id": "u2", "ts": ts, "inview": ["c20"], "clicked": ["c20"]},
+    ])
+    return items, inst, imp
+
+
+def test_impression_negatives_come_from_the_gold_impression_only():
+    items, inst, imp = _imp_world()
+    t0 = items.set_index("item_id")["t0"].astype("int64").to_dict()
+    kept, drops = attach_negatives(inst, imp, t0, n_neg=5, min_neg=1)
+    assert [r["user_id"] for r in kept] == ["u0"]
+    assert drops == {"no_gold_impression": 1, "no_negatives": 1, "too_few_negatives": 0}
+    # c20 gold, c21 clicked, w60 history, zz unknown, c25 launched after the target time,
+    # c23/c24 only in another impression: all excluded
+    assert t0["c25"] > inst[0]["target_ts"] >= t0["c22"]
+    assert sorted(kept[0]["imp_negatives"]) == ["c22", "w00"]
+    # capped and seeded
+    small, _ = attach_negatives(inst, imp, t0, n_neg=1, min_neg=1)
+    assert len(small[0]["imp_negatives"]) == 1 and small == attach_negatives(inst, imp, t0, n_neg=1, min_neg=1)[0]
+    assert attach_negatives(inst, imp, t0, n_neg=5, min_neg=3)[1]["too_few_negatives"] == 1
+
+
+def test_impression_examples_match_inference_prompts():
+    from coldrank.common import ts_to_date
+
+    items, inst, imp = _imp_world()
+    t0 = items.set_index("item_id")["t0"].astype("int64").to_dict()
+    kept, _ = attach_negatives(inst, imp, t0, n_neg=5, min_neg=1)
+    kept[0]["cutoff_T"] = ts_to_date(T)
+    cfg = {"prompt": {"history_len": {"pointwise": 20}}}
+    it = items.set_index("item_id")
+    rows = build_imp_examples(kept, it, cfg, "chatml", len, 10**6)
+    assert [(r["item_id"], r["role"], r["label"]) for r in rows] == \
+        [("c20", GOLD, "Yes")] + [(i, IMP_NEG, "No") for i in kept[0]["imp_negatives"]]
+    pool = {"history": history_records(kept[0], it)}
+    for r in rows:
+        cand = candidate_record(r["item_id"], it, is_cold=t0[r["item_id"]] > T, is_gold=r["label"] == "Yes",
+                                sim=0.0, pop=0, warm_rank=None)
+        assert r["prompt"] == format_chat("chatml", *render_pointwise(pool, cand, 20)) and not r["trimmed"]
+    cue = date_cue(kept, t0)
+    # c22 (T + 23 h) is newer than the gold c20 (T + 21 h); w00 is old
+    assert cue["gold_newer_than_all_negatives"] == 0.0 and cue["neg_cold_frac"] == 0.5
+
+
+def test_train_settings_override_precedence():
+    pytest.importorskip("torch")
+    from coldrank.finetune.train import train_settings
+
+    eb = load_config("ebnerd")
+    llama, qwen = load_config("finetune"), load_config("finetune_qwen25_7b")
+    # Llama-2: EB-NeRD's batch shape applies (4 GPUs x 2 x 4 = 32), as in job 40929
+    assert {k: train_settings(eb, llama)[k] for k in ("per_device_batch", "grad_accum")} == {"per_device_batch": 2, "grad_accum": 4}
+    # Qwen on one GPU keeps its own 8 x 4 = 32
+    for name in ("finetune_qwen25_7b", "finetune_qwen25_7b_imp"):
+        tc = train_settings(eb, load_config(name))
+        assert (tc["per_device_batch"], tc["grad_accum"]) == (8, 4)
+    assert train_settings(load_config("amazon_vg"), llama) == llama["train"]
+    assert qwen["dataset_train_overrides"] is False
+
+
+def test_impression_finetune_configs_consistent():
+    models, eb = load_config("models"), load_config("ebnerd")
+    for ft_name, model in (("finetune_imp", "llama2_7b_ftimp_ebnerd"), ("finetune_qwen25_7b_imp", "qwen25_7b_ftimp_ebnerd")):
+        fcfg = load_config(ft_name)
+        pool_cfg = load_config("finetune" if ft_name == "finetune_imp" else "finetune_qwen25_7b")
+        assert fcfg["sft_variant"] == "imp" and models[model]["base"] == fcfg["base_model"]
+        # identical training recipe to the pool-data config, apart from the data variant
+        assert {k: v for k, v in fcfg.items() if k != "sft_variant"} == pool_cfg
+        # train.py writes outputs/finetune/<dataset>/<base without _fp16>_<variant>/adapter
+        assert models[model]["adapter"] == \
+            f"outputs/finetune/{eb['dataset']}/{fcfg['base_model'].replace('_fp16', '')}_imp/adapter"
+    icfg = imp_cfg(eb)
+    cuts = check_cutoffs(icfg)
+    assert cuts[0] == "2023-05-18" and len(cuts) == 7 and icfg["finetune"]["max_instances_per_cutoff"] == 750

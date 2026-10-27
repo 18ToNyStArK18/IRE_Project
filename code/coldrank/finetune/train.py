@@ -9,7 +9,9 @@ is computed as if unpadded and only the last position's logits are materialized.
 Run with torchrun (one model copy per GPU):
     torchrun --nproc_per_node 4 -m coldrank.finetune.train --config amazon_vg
     python -m coldrank.finetune.train --config ebnerd --ft-config finetune_qwen25_7b   # one GPU
-Output: outputs/finetune/<dataset>/<base>/ (adapter/, checkpoints/, train_summary.json)
+Output: outputs/finetune/<dataset>/<base>[_<sft_variant>]/ (adapter/, checkpoints/, train_summary.json)
+An ft config with `sft_variant: imp` trains on the impression-negative examples
+(coldrank.finetune.impressions) instead of the pool examples (coldrank.finetune.sft_data).
 """
 
 from __future__ import annotations
@@ -24,8 +26,7 @@ import torch
 import torch.nn.functional as F
 
 from coldrank.common import OUT_DIR, load_config, read_jsonl
-from coldrank.finetune.sft_data import sft_paths
-from coldrank.finetune.trainpools import ft_dir
+from coldrank.finetune.sft_data import sft_dir, sft_paths
 from coldrank.llm.chat import format_chat
 from coldrank.llm.engine import NO_SPELLINGS, YES_SPELLINGS, answer_token_ids
 
@@ -48,6 +49,16 @@ def answer_ids(tok, family: str) -> dict[str, int]:
         assert ids[-1] in answer_token_ids(tok, spellings), (label, ids[-1])
         out[label] = ids[-1]
     return out
+
+
+def train_settings(cfg: dict, fcfg: dict) -> dict:
+    """The ft config's train values, with the dataset's batch shape (`finetune.train_overrides`, same
+    effective batch) laid over them unless the ft config sets `dataset_train_overrides: false`
+    (its batch was sized for its own GPU)."""
+    tc = fcfg["train"]
+    if fcfg.get("dataset_train_overrides", True):
+        tc = {**tc, **(cfg["finetune"].get("train_overrides") or {})}
+    return tc
 
 
 class PromptDataset(torch.utils.data.Dataset):
@@ -94,10 +105,10 @@ def main() -> None:
     cfg, fcfg = load_config(args.config), load_config(args.ft_config)
     base_key = fcfg["base_model"]
     mcfg = load_config("models")[base_key]
-    tc, lc, qc = fcfg["train"], fcfg["lora"], fcfg["quant"]
-    tc = {**tc, **(cfg["finetune"].get("train_overrides") or {})}  # per-dataset batch shape (same effective batch)
+    tc, lc, qc = train_settings(cfg, fcfg), fcfg["lora"], fcfg["quant"]
     fcfg = {**fcfg, "train": tc}  # recorded in train_summary.json as used
-    out = OUT_DIR / "finetune" / cfg["dataset"] / base_key.replace("_fp16", "")
+    variant = fcfg.get("sft_variant", "")  # "imp": impression negatives (finetune.impressions)
+    out = OUT_DIR / "finetune" / cfg["dataset"] / (base_key.replace("_fp16", "") + (f"_{variant}" if variant else ""))
     if args.max_steps > 0 or args.limit:
         out = out.parent / f"{out.name}_pilot"  # never mistake a pilot for the real adapter
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
@@ -105,7 +116,7 @@ def main() -> None:
     tok = AutoTokenizer.from_pretrained(mcfg["hf_id"], revision=mcfg["revision"])
     pad_id = tok.unk_token_id if tok.pad_token_id is None else tok.pad_token_id
     ans = answer_ids(tok, mcfg["family"])
-    train_path, val_path, _ = sft_paths(ft_dir(cfg), base_key)
+    train_path, val_path, _ = sft_paths(sft_dir(cfg, variant), base_key, variant)
     train_rows = list(read_jsonl(train_path))[: args.limit]
     val_rows = list(read_jsonl(val_path))
     train_ds, val_ds = PromptDataset(train_rows, tok, ans), PromptDataset(val_rows, tok, ans)

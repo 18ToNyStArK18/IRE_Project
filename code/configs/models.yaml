@@ -131,11 +131,35 @@ llama2_7b_ft_ebnerd:
   vllm:
     tensor_parallel_size: 2
 
+# Llama-2 fine-tuned on EB-NeRD with impression negatives (finetune_imp.yaml; design.md
+# "Production-style training data").
+llama2_7b_ftimp_ebnerd:
+  base: llama2_7b_fp16
+  adapter: outputs/finetune/ebnerd/llama2_7b_imp/adapter
+  family: llama2
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 2
+
 # Exploratory (pkgpu, one RTX 5000 Ada): Qwen2.5-7B fine-tuned on EB-NeRD; bf16 (15 GB) fits one GPU.
 qwen25_7b_ft_ebnerd:
   base: qwen25_7b
   adapter: outputs/finetune/ebnerd/qwen25_7b/adapter
   dtype: bfloat16              # resolve_adapter keeps this entry's keys, so the base's dtype is repeated
+  family: chatml
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 1
+
+# Qwen2.5-7B fine-tuned on EB-NeRD with impression negatives (finetune_qwen25_7b_imp.yaml).
+qwen25_7b_ftimp_ebnerd:
+  base: qwen25_7b
+  adapter: outputs/finetune/ebnerd/qwen25_7b_imp/adapter
+  dtype: bfloat16
   family: chatml
   max_model_len: 4096
   listwise: false

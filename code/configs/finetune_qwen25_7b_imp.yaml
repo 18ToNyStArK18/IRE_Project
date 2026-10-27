@@ -1,0 +1,31 @@
+# QLoRA fine-tuning of Qwen2.5-7B-Instruct on one GPU, impression negatives (coldrank.finetune.impressions;
+# design.md "Production-style training data").
+# Same values as finetune.yaml (Llama-2) except the base model, bf16 compute and the batch split.
+base_model: qwen25_7b               # models.yaml key: full-precision weights, quantized to 4 bit at load
+sft_variant: imp                    # SFT files from coldrank.finetune.impressions; output <base>_imp/
+dataset_train_overrides: false      # its 8 x 4 batch is sized for one 32 GB GPU: ignore finetune.train_overrides
+
+quant:
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  compute_dtype: bfloat16           # RTX 5000 Ada (sm_89) has bf16, Qwen2.5's training dtype
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+train:
+  epochs: 1
+  lr: 2.0e-4
+  scheduler: cosine
+  warmup_ratio: 0.03
+  per_device_batch: 8
+  grad_accum: 4                     # effective batch 1 GPU x 8 x 4 = 32, as for Llama-2
+  weight_decay: 0.0
+  max_grad_norm: 0.3
+  seed: 42
+  logging_steps: 10
+  eval_steps: 100
+  save_steps: 100

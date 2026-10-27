@@ -70,3 +70,11 @@ finetune:
   # news prompts average 1,243 tokens (Amazon 524): batch 4 ran out of GPU memory (job 40530), so
   # 2 per GPU x 4 accumulation steps keeps the effective batch at 32 (configs/finetune.yaml)
   train_overrides: {per_device_batch: 2, grad_accum: 4}
+  # production-style negatives (coldrank.finetune.impressions; design.md "Production-style training
+  # data"): the articles shown with the gold click and not clicked. Impressions (behaviors) start
+  # 2023-05-18, so daily cutoffs 18-24 May, 1-day windows; same cap as the pool data
+  impressions:
+    cutoffs: ["2023-05-18", "2023-05-19", "2023-05-20", "2023-05-21", "2023-05-22", "2023-05-23", "2023-05-24"]
+    max_instances_per_cutoff: 750
+    n_neg: 5                       # 1 positive : 5 negatives, as the pool data
+    min_neg: 1

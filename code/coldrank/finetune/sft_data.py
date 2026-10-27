@@ -32,11 +32,19 @@ from coldrank.prompts.render import render_pointwise
 LEGACY_MODEL = "llama2_7b_fp16"  # its files keep the unsuffixed names the ADA scripts expect
 
 
-def sft_paths(fd: Path, model: str) -> tuple[Path, Path, Path]:
+def sft_paths(fd: Path, model: str, variant: str = "") -> tuple[Path, Path, Path]:
     """(train, val, stats) files of a model's SFT examples; the prompts depend on the model's
-    tokenizer and chat format, so every model has its own files."""
-    sfx = "" if model == LEGACY_MODEL else f"_{model}"
+    tokenizer and chat format, so every model has its own files. A data variant (e.g. "imp",
+    coldrank.finetune.impressions) always gets the model and variant suffix."""
+    sfx = "" if model == LEGACY_MODEL and not variant else f"_{model}" + (f"_{variant}" if variant else "")
     return fd / f"sft_train{sfx}.jsonl", fd / f"sft_val{sfx}.jsonl", fd / f"sft_stats{sfx}.json"
+
+
+def sft_dir(cfg: dict, variant: str = "") -> Path:
+    """Directory of the SFT files: <split>/finetune/, or <split>/finetune/impressions/ for "imp"."""
+    if variant not in ("", "imp"):
+        raise ValueError(f"unknown sft_variant {variant!r}")
+    return ft_dir(cfg) / "impressions" if variant == "imp" else ft_dir(cfg)
 
 
 def select_candidates(pool: dict, n_warm: int) -> list[dict]:
