@@ -516,3 +516,20 @@ Evidence: our Mistral runs (dev-direct job 20873, promptcheck job 21054) and the
   2. `torchrun --nproc_per_node 4 -m coldrank.finetune.train --config ebnerd --ft-config finetune_imp`. Note: `ft_train.sbatch` (git-ignored) checks for `sft_train.jsonl`; for this variant it must check `finetune/impressions/sft_train_llama2_7b_fp16_imp.jsonl` and call `coldrank.finetune.impressions` instead of `sft_data`.
   3. `ft-dev` / `ft-test` pointwise for `llama2_7b_ftimp_ebnerd` (the zero-shot `llama2_7b_fp16` runs are reused).
 - **Qwen (pkgpu):** the same with `--model qwen25_7b` and `--ft-config finetune_qwen25_7b_imp`, one GPU.
+- **Review of the impression-negative data (2026-10-27, before any run):**
+  - **Li et al. correction verified** against the PDF (`readings/li2026_…pdf`, §3.1.2: "for the SFT training set, we sampled 16,218 interactions after removing cold-start items"; §3.3: "the training data excludes cold-start items"). Our pool-based training data, where the gold is always new, is therefore **not** Li et al.'s SFT data. That data is the cold-start test protocol used as training data, and the paper should describe it that way. The earlier statements here and in chat that it replicates Li et al.'s training labels were wrong.
+  - **Code:** 102 tests pass on `main` at `91f1715`. `impressions.py` is consistent with the pool pipeline: the same `training_instances`, the inference prompt, leak asserts, and `is_cold` measured against the instance's own T′.
+  - **Date cue removed** (local CPU run of the instance and negative steps; no tokenizer needed):
+    - the gold is newer than all its negatives in 11.3% of instances;
+    - the gold is the newest of its group in 11.7%, against 18.2% expected by chance;
+    - median age at the click is 1.8 h for the gold and 1.5 h for the negatives;
+    - 80.5% of the negatives are themselves new at T′.
+
+    Pool data, by comparison: the gold is newest in 66%, and every warm negative is older than every cold candidate in 100% of pools.
+  - **Size:** only **1,677 of 5,250 instances** keep a negative (≈ 4.6 negatives each, so ≈ 9.4k examples against 31.5k for the pool data). The drops are real, not a matching bug. On 21 May (750 instances), the gold click has an impression at the same timestamp for 257. For the rest:
+    - 352: the gold never appears in the user's logged impressions (the click comes from the history log, and EB-NeRD's behaviour logs are a sample);
+    - 136: the gold is only shown, not clicked, in a logged impression;
+    - 5: clicked in an impression hours away.
+
+    Training on about a third of the data is a confound when comparing against the pool-data model.
+  - **Amazon has no impressions**, so this ablation exists for EB-NeRD only.
