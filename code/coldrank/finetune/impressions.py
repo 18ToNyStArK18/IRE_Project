@@ -6,12 +6,13 @@ logs, the negatives are the articles shown to the user together with the gold an
 (design.md "Production-style training data").
 
 Per cutoff T' (config `finetune.impressions.cutoffs`; EB-NeRD impressions start 2023-05-18):
-  1. instances: `trainpools.training_instances` (test split rules, no dev/test user,
-     `require_cold_negs`, seeded cap `max_instances_per_cutoff`);
+  1. instances: `trainpools.training_instances`, uncapped (test split rules, no dev/test user,
+     `require_cold_negs`), in its seeded order;
   2. the gold's impression(s): the user's impressions at the target time whose clicks include
      the gold; negatives = in view, not clicked there, not in the user's window or history,
      a known article launched by the target time; up to `n_neg` (seeded); an instance with
-     fewer than `min_neg` is dropped;
+     fewer than `min_neg` is dropped; then the cap `max_instances_per_cutoff` (EB-NeRD logs only
+     a sample of impressions: capping before this filter kept 1,677 of 5,250);
   3. examples: the gold ("Yes") and each negative ("No"), with the inference prompt
      (`sft_data.pointwise_prompt`). Users are split into train / validation as in sft_data.
 
@@ -80,6 +81,23 @@ def attach_negatives(inst: list[dict], imp: pd.DataFrame, t0: dict, n_neg: int, 
     return kept, drops
 
 
+def cutoff_instances(pos: pd.DataFrame, items: pd.DataFrame, imp: pd.DataFrame, t0: dict, icfg: dict,
+                     cutoff: str, excluded: set) -> tuple[list[dict], dict]:
+    """Instances at T' = cutoff with their impression negatives, capped after the impression
+    filter: the first `max_instances_per_cutoff` of `training_instances`' seeded order that
+    have a gold impression, so the data is as large as the pool data."""
+    ic = icfg["finetune"]
+    uncapped = {**icfg, "finetune": {**ic, "max_instances_per_cutoff": None}}
+    inst, st = training_instances(pos, items, uncapped, cutoff, excluded)
+    inst, drops = attach_negatives(inst, imp, t0, int(ic["n_neg"]), int(ic["min_neg"]))
+    st = {**st, **drops, "n_with_impression": len(inst)}
+    if ic.get("max_instances_per_cutoff"):
+        inst = inst[: int(ic["max_instances_per_cutoff"])]
+    for r in inst:
+        r["cutoff_T"] = cutoff
+    return inst, {**st, "n_kept": len(inst)}
+
+
 def build_examples(inst: list[dict], it: pd.DataFrame, cfg: dict, family: str, count_tokens, max_len: int) -> list[dict]:
     """Pointwise examples: gold "Yes", each impression negative "No"; prompts as at inference."""
     rows = []
@@ -118,7 +136,6 @@ def main() -> None:
     args = ap.parse_args()
     cfg = load_config(args.config)
     icfg = imp_cfg(cfg)
-    ic = icfg["finetune"]
     mcfg = load_config("models")[args.model]
     from transformers import AutoTokenizer
 
@@ -137,11 +154,7 @@ def main() -> None:
 
     inst, per_cut = [], {}
     for c in check_cutoffs(icfg):
-        ci, st = training_instances(pos, items, icfg, c, excluded)
-        ci, drops = attach_negatives(ci, imp, t0, int(ic["n_neg"]), int(ic["min_neg"]))
-        for r in ci:
-            r["cutoff_T"] = c
-        per_cut[c] = {**st, **drops, "n_kept": len(ci)}
+        ci, per_cut[c] = cutoff_instances(pos, items, imp, t0, icfg, c, excluded)
         inst += ci
     for r in inst:  # leak checks, as in trainpools.collect
         assert r["user_id"] not in excluded and r["target_ts"] < T, r["instance_id"]

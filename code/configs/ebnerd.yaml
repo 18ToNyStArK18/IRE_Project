@@ -75,6 +75,6 @@ finetune:
   # 2023-05-18, so daily cutoffs 18-24 May, 1-day windows; same cap as the pool data
   impressions:
     cutoffs: ["2023-05-18", "2023-05-19", "2023-05-20", "2023-05-21", "2023-05-22", "2023-05-23", "2023-05-24"]
-    max_instances_per_cutoff: 750
+    max_instances_per_cutoff: 750  # applied after the impression filter (1,974-2,748 per day pass it)
     n_neg: 5                       # 1 positive : 5 negatives, as the pool data
     min_neg: 1

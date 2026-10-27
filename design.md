@@ -533,3 +533,9 @@ Evidence: our Mistral runs (dev-direct job 20873, promptcheck job 21054) and the
 
     Training on about a third of the data is a confound when comparing against the pool-data model.
   - **Amazon has no impressions**, so this ablation exists for EB-NeRD only.
+- **Decision (2026-10-27, user): the cap is applied after the impression filter.** `impressions.cutoff_instances` takes all of `training_instances`' instances in its seeded order (uncapped), keeps those with a gold impression and at least one negative, then takes the first 750 per cutoff. So the impression data has the same 5,250 instances as the pool data, and no size-matched control run is needed.
+  - Check (pkgpu CPU, full data): uncapped, 16,390 of 52,427 instances have a gold impression, **1,974–2,748 per day**, so every cutoff fills its 750.
+  - The drops are not a timestamp mismatch: of the 36,037 dropped, the gold is clicked in a logged impression within 5 min for only 50 (same day: 298). For 5,723 it is shown in an impression within 5 min but not clicked there; these are not used, since the gold was not clicked in that impression.
+  - Side effect: the training set is now "cold clicks that have a logged impression" rather than a random sample of cold clicks. Instance ids are numbered over the uncapped list, so they are not contiguous.
+  - **Amazon:** decided after the EB-NeRD impression results (user).
+  - **Any data built before this commit (1,677 instances) is stale:** rebuild with step 1 above before training.

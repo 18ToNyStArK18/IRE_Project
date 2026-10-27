@@ -208,6 +208,27 @@ def test_impression_negatives_come_from_the_gold_impression_only():
     assert attach_negatives(inst, imp, t0, n_neg=5, min_neg=3)[1]["too_few_negatives"] == 1
 
 
+def test_impression_cap_applies_after_the_impression_filter(monkeypatch):
+    import coldrank.finetune.impressions as impressions
+
+    items, inst, imp = _imp_world()
+    t0 = items.set_index("item_id")["t0"].astype("int64").to_dict()
+    seen = {}
+
+    def fake_instances(pos, items_, cfg, cutoff, excluded):  # seeded order: u1, u2 (no negative), u0
+        seen["cap"] = cfg["finetune"]["max_instances_per_cutoff"]
+        return [dict(r) for r in (inst[1], inst[2], inst[0])], {"n_instances": 3}
+
+    monkeypatch.setattr(impressions, "training_instances", fake_instances)
+    icfg = {"finetune": {"max_instances_per_cutoff": 1, "n_neg": 5, "min_neg": 1}}
+    kept, st = impressions.cutoff_instances(None, items, imp, t0, icfg, "2023-05-18", set())
+    # capping first would have kept u1 and then dropped it
+    assert seen["cap"] is None
+    assert [(r["user_id"], r["cutoff_T"]) for r in kept] == [("u0", "2023-05-18")]
+    assert (st["n_instances"], st["n_with_impression"], st["n_kept"]) == (3, 1, 1)
+    assert st["no_gold_impression"] == 1 and st["no_negatives"] == 1
+
+
 def test_impression_examples_match_inference_prompts():
     from coldrank.common import ts_to_date
 
