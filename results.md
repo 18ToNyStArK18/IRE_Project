@@ -67,3 +67,33 @@ Running log of results, newest sections appended at the end. Setup and decisions
 | A5 Flood, n = 10 | A1 + 10 relabelled | 0.027 | 0.100 | −0.147\* | … 0.887. Already saturated after one fake date: the 3 traps alone take most top spots, so extra fake-new items change little |
 
 **Summary.** On news the shortcut is even more complete than on Amazon. Zero-shot, Llama-2-7B is at chance, with a small date sensitivity (swap −0.040\*, shuffle −0.053\* / −0.047\*). The fine-tuned model reaches 0.43 / 0.41, yet it never beats the newest-first rule. It drops to 0 when the correct article's date is swapped and to below chance when dates are hidden, and is at chance when all candidates are new (A6). New-looking traps win 77–89% of top spots. Fine-tuning taught it the date rule and, unlike on Amazon, no content signal. Dev results; EB-NeRD test pending (after the A1-ctrl pool rebuild).
+
+## Llama-2-7B fine-tuned on EB-NeRD (news) — test set (2026-10-27)
+
+**Model.** This is the same fine-tuned Llama-2-7B-Chat as the EB-NeRD dev section above (fine-tuned on EB-NeRD, job 40929). Evaluation jobs: 41455 for the fine-tuned model and 41456 for zero-shot (the same fp16 weights without fine-tuning).
+
+**Evaluation.** EB-NeRD test, K = 15 candidates, pointwise scoring.
+- **Users:** 800 per cold-target cell (Baseline, A2–A4); 650 for A6 (only 650 test users have 14 new articles published before the click); 1,000 per old-target cell (A1-ctrl, A1, A5).
+- **Recall@1** is given as random / hard negatives; chance = 1/15 = 0.067.
+- **Change** is the fine-tuned model's paired change against the reference row (Baseline for A2–A6, A1-ctrl for A1/A5); \* = McNemar p < 0.05.
+- **Trap@1** chance = 0.20.
+- **Pools:** A1-ctrl uses the rebuilt pools (letter-code fix; pointwise prompts unchanged).
+
+| Ablation | What it does | Recall@1, zero-shot | Recall@1, fine-tuned | Change (fine-tuned) | What the change means |
+|---|---|---|---|---|---|
+| Baseline | Li et al.'s protocol: correct article is new; dates shown | 0.055 / 0.054 | 0.394 / 0.487 | +0.339\* / +0.434\* vs zero-shot | A big gain over zero-shot (6–7× chance), but still **below the newest-first rule** (0.560 / 0.515) |
+| A2 Swap | correct article's date swapped with an old wrong one's | 0.036 / 0.039 | 0.001 / 0.000 | −0.393\* / −0.487\* | All of the accuracy moves with the date: once the correct article looks old, it is (almost) never picked |
+| A3 Hide | all dates removed | 0.024 / 0.025 | 0.014 / 0.013 | −0.380\* / −0.475\* | Below chance without dates: it has essentially nothing besides the date |
+| A4 Shuffle | dates randomly reassigned among candidates | 0.043 / 0.040 | 0.035 / 0.031 | −0.359\* / −0.456\* | Below chance: wrong dates break it completely |
+| A6 All-new | all 15 candidates are new articles | 0.094 / 0.062 | 0.097 / 0.117 | −0.305\* / −0.368\* | Near chance when dates cannot separate the candidates: at most a weak content signal (1.5–1.75× chance) |
+| A1-ctrl (old-target reference) | correct article is old; nothing new-looking | 0.065 | 0.241 | — | Reference for the rows below |
+| A1 Traps | correct article is old, plus 3 new irrelevant articles | 0.059 | 0.106 | −0.135\* | Traps take the top spot 83% of the time (zero-shot 18%, chance 20%) |
+| A5 Flood, n = 1 | A1 + 1 old wrong article relabelled with a new date | 0.059 | 0.104 | −0.137\* | Trap@1 0.846 … |
+| A5 Flood, n = 2 | A1 + 2 relabelled | 0.059 | 0.107 | −0.134\* | … 0.850 … |
+| A5 Flood, n = 5 | A1 + 5 relabelled | 0.053 | 0.113 | −0.128\* | … 0.858 … |
+| A5 Flood, n = 10 | A1 + 10 relabelled | 0.049 | 0.110 | −0.131\* | … 0.888. Already saturated: the 3 traps alone take most top spots |
+
+**Summary.** Test replicates dev: same signs and similar sizes, and every fine-tuned change has p < 1e-26.
+- **Zero-shot:** at or below chance (0.055 / 0.054), with small but significant date effects: swap −0.019\* / −0.015\*, hide −0.031\* / −0.029\*, shuffle −0.013\* / −0.014\*.
+- **Fine-tuned:** 0.39 / 0.49, yet below the newest-first rule. It is at 0 when the correct article's date is swapped and below chance with dates hidden or shuffled. It is near chance when all candidates are new, and traps win 83–89% of top spots.
+- **On news, fine-tuning with Li et al.'s protocol teaches the date rule and almost nothing else.**
