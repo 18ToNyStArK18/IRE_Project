@@ -533,9 +533,20 @@ Evidence: our Mistral runs (dev-direct job 20873, promptcheck job 21054) and the
 
     Training on about a third of the data is a confound when comparing against the pool-data model.
   - **Amazon has no impressions**, so this ablation exists for EB-NeRD only.
+- **Decision (2026-10-27, user):** run the impression-negative fine-tune for **Llama-2-7B on EB-NeRD** (dev + test, the same `ft-dev` / `ft-test` stages, zero-shot `llama2_7b_fp16` runs reused) and compare it with the pool-data model. Amazon is decided afterwards: if the two EB-NeRD models differ, we revisit Amazon; if they agree, the paper reports that the EB-NeRD result holds with production-style negatives. No size-matched control for now.
+- **`ft_train.sbatch` (git-ignored):** a new `FT_CONFIG` variable (default `finetune`) is passed to `train.py --ft-config`. The script resolves the SFT train file the same way `train.py` does (`sft_dir` / `sft_paths`) and, if the file is missing, builds it with `finetune.impressions` (`sft_variant: imp`) or `finetune.sft_data`. Default runs resolve to the same `sft_train.jsonl` as before.
+- **EB-NeRD impression-negative jobs (submitted 2026-10-27):** code and `impressions.parquet` synced to ADA; the split input files match locally (sha256 checked). Jobs:
+  - **43147:** fine-tune, `FT_CONFIG=finetune_imp`, 4 × 2080 Ti; it builds the impression SFT files first;
+  - **43148:** `ft-dev` for `llama2_7b_ftimp_ebnerd`, after 43147;
+  - **43149:** `ft-test`, after 43148.
 - **Decision (2026-10-27, user): the cap is applied after the impression filter.** `impressions.cutoff_instances` takes all of `training_instances`' instances in its seeded order (uncapped), keeps those with a gold impression and at least one negative, then takes the first 750 per cutoff. So the impression data has the same 5,250 instances as the pool data, and no size-matched control run is needed.
   - Check (pkgpu CPU, full data): uncapped, 16,390 of 52,427 instances have a gold impression, **1,974–2,748 per day**, so every cutoff fills its 750.
   - The drops are not a timestamp mismatch: of the 36,037 dropped, the gold is clicked in a logged impression within 5 min for only 50 (same day: 298). For 5,723 it is shown in an impression within 5 min but not clicked there; these are not used, since the gold was not clicked in that impression.
   - Side effect: the training set is now "cold clicks that have a logged impression" rather than a random sample of cold clicks. Instance ids are numbered over the uncapped list, so they are not contiguous.
   - **Amazon:** decided after the EB-NeRD impression results (user).
   - **Any data built before this commit (1,677 instances) is stale:** rebuild with step 1 above before training.
+- **Stale impression run (2026-10-28):** job 43147 finished (gnode053, 1 h 48 min, exit 0), but it trained on the pre-fix data: 1,677 instances, 8,957 train examples. Validation loss 0.493 → 0.469 → 0.434, against 0.451 for the 1 : 5 label prior. Its dev evaluation **43148 failed** after 2 min: gnode053's `/tmp` was full (`gcc … fatal error: error writing to /tmp/…: No space left on device` while Triton compiled its launcher). A node problem, not our code; evaluations now exclude gnode053. 43149 never started (dependency failed) and was cancelled. The stale model is not evaluated (user decision): the adapter is moved to `outputs/finetune/ebnerd/llama2_7b_imp_stale1677/` and its SFT files to `finetune/impressions_stale1677/`, so the rerun rebuilds the data and does not resume from stale checkpoints.
+- **Rerun on the fixed impression data (submitted 2026-10-28):** friend's `c0c0166` pulled (18 fine-tuning tests pass) and synced to ADA. Jobs exclude gnode069, gnode011 and gnode053:
+  - **43488:** fine-tune, `FT_CONFIG=finetune_imp`; it rebuilds the SFT files (expected 5,250 instances);
+  - **43489:** `ft-dev`, after 43488;
+  - **43490:** `ft-test`, after 43489.
