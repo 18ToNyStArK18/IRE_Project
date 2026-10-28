@@ -97,3 +97,60 @@ Running log of results, newest sections appended at the end. Setup and decisions
 - **Zero-shot:** at or below chance (0.055 / 0.054), with small but significant date effects: swap −0.019\* / −0.015\*, hide −0.031\* / −0.029\*, shuffle −0.013\* / −0.014\*.
 - **Fine-tuned:** 0.39 / 0.49, yet below the newest-first rule. It is at 0 when the correct article's date is swapped and below chance with dates hidden or shuffled. It is near chance when all candidates are new, and traps win 83–89% of top spots.
 - **On news, fine-tuning with Li et al.'s protocol teaches the date rule and almost nothing else.**
+
+## Qwen2.5-7B fine-tuned on Amazon Video Games — dev set (2026-10-28)
+
+**Model.** Qwen2.5-7B-Instruct (`Qwen/Qwen2.5-7B-Instruct` @ `a09a3545…`, fp16), **fine-tuned on Amazon Video Games** with the same recipe as Llama-2: QLoRA (4-bit, 1 epoch, pointwise Yes/No, dates shown as in production, effective batch 32). Training data: 23,712 examples from 4,166 pools at 6 earlier cutoffs (Sep 2019 – Mar 2022). Training ran on one 11 GB GPU (ada, job 40320, 7 h 03 min, final validation loss 0.245). **Zero-shot** = the same fp16 weights without fine-tuning (job 42662); fine-tuned evaluation: job 40321.
+
+**Differences from the Llama-2 runs.**
+- **One-GPU training:** batch 2 × 16 gradient accumulation (same effective batch 32), and the input embeddings and `lm_head` kept in fp16 (`keep_embeddings_fp16`) so Qwen's 152k-token vocabulary fits in memory (`configs/finetune_qwen25_1gpu.yaml`).
+- **Evaluation:** both models are loaded 4-bit at load time (vLLM bitsandbytes) on one GPU instead of fp16 on two. Zero-shot and fine-tuned use the same setting, so the change columns are like-for-like. Absolute numbers are not strictly comparable with the fp16 Llama-2 rows.
+- **Fast-vs-exact pointwise check:** tolerance 0.15 instead of 0.05 (the 4-bit loading adds up to 0.09 log-odds of rounding noise).
+
+**Evaluation.** Amazon VG dev, K = 15 candidates, pointwise scoring. 150 users per cold-target cell (Baseline, A2–A4), 149 for A6, 142 per old-target cell (A1-ctrl, A1, A5). Recall@1 as random / hard negatives; chance = 1/15 = 0.067. **Change** = the fine-tuned model's paired change against the reference row (Baseline for A2–A6, A1-ctrl for A1/A5); \* = McNemar p < 0.05. The A5 pools also contain A1's 3 traps. Trap@1 chance = 0.20.
+
+| Ablation | What it does | Recall@1, zero-shot | Recall@1, fine-tuned | Change (fine-tuned) | What the change means |
+|---|---|---|---|---|---|
+| Baseline | Li et al.'s protocol: correct item is new; dates shown | 0.040 / 0.027 | 0.440 / 0.533 | +0.400\* / +0.507\* vs zero-shot | Fine-tuning works: 6–8× chance, above the newest-first rule (0.347 / 0.360) |
+| A2 Swap | correct item's date swapped with an old wrong item's | 0.027 / 0.013 | 0.000 / 0.007 | −0.440\* / −0.527\* | All of the accuracy moves with the "new" date |
+| A3 Hide | all dates removed | 0.080 / 0.067 | 0.147 / 0.147 | −0.293\* / −0.387\* | About 2× chance without dates; two-thirds or more of the accuracy depends on the date (the model never saw date-less prompts, so this overstates the recency share somewhat) |
+| A4 Shuffle | dates randomly reassigned among candidates | 0.047 / 0.033 | 0.093 / 0.120 | −0.347\* / −0.413\* | Wrong dates break it about as badly as no dates |
+| A6 All-new | all 15 candidates are new items | 0.161 / 0.040 | 0.141 / 0.275 | −0.302\* / −0.262\* | Some content learned (4× chance on hard negatives), but random negatives fall to about 2× chance without the "only the correct item is new" cue |
+| A1-ctrl (old-target reference) | correct item is old; nothing new-looking | 0.042 | 0.387 | — | Reference for the rows below |
+| A1 Traps | correct item is old, plus 3 new irrelevant items | 0.056 | 0.169 | −0.218\* | Traps take the top spot: Trap@1 0.585 (zero-shot 0.000) |
+| A5 Flood, n = 1 | A1 + 1 old wrong item relabelled with a new date | 0.056 | 0.141 | −0.246\* | Trap@1 0.655 … |
+| A5 Flood, n = 2 | A1 + 2 relabelled | 0.056 | 0.113 | −0.275\* | … 0.725 … |
+| A5 Flood, n = 5 | A1 + 5 relabelled | 0.056 | 0.099 | −0.289\* | … 0.810 … |
+| A5 Flood, n = 10 | A1 + 10 relabelled | 0.106 | 0.077 | −0.310\* | … 0.901: at about chance once enough items look new |
+
+**Summary.** Fine-tuned Qwen2.5-7B shows the same pattern as fine-tuned Llama-2. It is accurate (0.44 / 0.53, above newest-first), but swapping, hiding or shuffling the dates removes most of that accuracy, and new-looking items take 59–90% of top spots. Zero-shot it is *below* chance (0.040 / 0.027) and the dates barely move it: of A2–A4, only hide on hard negatives is significant (+0.040\*). It avoids new items for reasons other than their dates: its Recall@1 rises to 0.161 when every candidate is new (A6 random, +0.121\*), and it almost never ranks a trap first (Trap@1 0.000 on A1).
+
+## Qwen2.5-7B fine-tuned on Amazon Video Games — test set (2026-10-28)
+
+**Model.** The same fine-tuned Qwen2.5-7B-Instruct as in the dev section (job 40320), with the same 4-bit evaluation setting. Evaluation jobs: fine-tuned 40321, zero-shot 42662 (each job covers dev and test).
+
+**Evaluation.** Amazon VG test, K = 15 candidates, pointwise scoring.
+- **Users:** 800 per cold-target cell (Baseline, A2–A6); 962 per old-target cell (A1-ctrl, A1, A5).
+- **Recall@1** is given as random / hard negatives; chance = 1/15 = 0.067.
+- **Change** is the fine-tuned model's paired change against the reference row (Baseline for A2–A6, A1-ctrl for A1/A5); \* = McNemar p < 0.05.
+- **Trap@1** chance = 0.20. The A5 pools also contain A1's 3 traps.
+
+| Ablation | What it does | Recall@1, zero-shot | Recall@1, fine-tuned | Change (fine-tuned) | What the change means |
+|---|---|---|---|---|---|
+| Baseline | Li et al.'s protocol: correct item is new; dates shown | 0.045 / 0.031 | 0.432 / 0.532 | +0.388\* / +0.501\* vs zero-shot | Fine-tuning works: 6–8× chance, above the newest-first rule (0.321 / 0.316) |
+| A2 Swap | correct item's date swapped with an old wrong item's | 0.040 / 0.029 | 0.015 / 0.014 | −0.417\* / −0.519\* | Accuracy follows the date, not the item |
+| A3 Hide | all dates removed | 0.048 / 0.026 | 0.138 / 0.146 | −0.295\* / −0.386\* | About 2× chance without dates (with the same caveat as on dev) |
+| A4 Shuffle | dates randomly reassigned among candidates | 0.043 / 0.031 | 0.079 / 0.081 | −0.354\* / −0.451\* | About chance: wrong dates break it completely |
+| A6 All-new | all 15 candidates are new items | 0.207 / 0.045 | 0.152 / 0.297 | −0.280\* / −0.235\* | Some content learned (4.4× chance on hard negatives), but it loses 44–65% of its accuracy without the "only the correct item is new" cue |
+| A1-ctrl (old-target reference) | correct item is old; nothing new-looking | 0.052 | 0.381 | — | Reference for the rows below |
+| A1 Traps | correct item is old, plus 3 new irrelevant items | 0.057 | 0.133 | −0.248\* | New-looking irrelevant items take the top spot: Trap@1 0.600 (zero-shot 0.004) |
+| A5 Flood, n = 1 | A1 + 1 old wrong item relabelled with a new date | 0.057 | 0.108 | −0.273\* | One fake "new" date hurts further (Trap@1 0.672) |
+| A5 Flood, n = 2 | A1 + 2 relabelled | 0.058 | 0.093 | −0.289\* | The damage grows with the number of new-looking items (Trap@1 0.738) … |
+| A5 Flood, n = 5 | A1 + 5 relabelled | 0.061 | 0.064 | −0.317\* | … (Trap@1 0.857) … |
+| A5 Flood, n = 10 | A1 + 10 relabelled | 0.087 | 0.055 | −0.326\* | … down to below chance (Trap@1 0.940) |
+
+**Summary.** Test replicates dev in every row (same signs, similar sizes, all fine-tuned changes p < 1e-30).
+- **Zero-shot:** below chance (0.045 / 0.031) and blind to dates: no A2–A4 change is significant. Its significant changes are A6 random (+0.163\*) and the A5 flood rows (+0.006\* to +0.035\*). It rarely ranks new items first (Trap@1 0.004 on A1), so its low baseline comes from avoiding new items on content, not from reading the dates.
+- **Fine-tuned:** 0.43 / 0.53, above newest-first, but swapping, hiding or shuffling the dates drops it to about chance, and new-looking items take 60–94% of top spots. It learned some content (A6 hard 0.297), but mostly the recency shortcut.
+- **Same as Llama-2 on Amazon:** fine-tuning with Li et al.'s protocol turns a model that does not use dates into one that mainly follows them, for both base models.
+- **Pool counts differ from the Llama-2 sections** (142 / 962 old-target users instead of 144 / 967, and a different newest-first score on hard negatives), because these pools were built separately on ada. Compare the two models by the size of their changes, not by individual cells.
