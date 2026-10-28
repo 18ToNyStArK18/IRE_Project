@@ -151,13 +151,21 @@ def test_sft_paths_per_model(tmp_path):
 
 
 def test_qwen_finetune_configs_consistent():
-    models, fcfg = load_config("models"), load_config("finetune_qwen25_7b")
+    models, fcfg = load_config("models"), load_config("finetune_qwen25_ada")
     base, ft = models[fcfg["base_model"]], models["qwen25_7b_ft_ebnerd"]
-    assert fcfg["base_model"] == ft["base"] == "qwen25_7b"
-    assert base["dtype"] == ft["dtype"] == fcfg["quant"]["compute_dtype"] == "bfloat16"
-    assert base["family"] == ft["family"] == "chatml" and not base.get("quantization")
+    assert fcfg["base_model"] == ft["base"] == "qwen25_7b_fp16"
+    # fp16 weights and compute (2080 Ti), evaluated 4-bit like the Amazon Qwen run
+    assert fcfg["quant"]["compute_dtype"] == "float16" and fcfg["quant"]["keep_embeddings_fp16"]
+    assert "dtype" not in base and "dtype" not in ft
+    assert base["quantization"] == ft["quantization"] == models["qwen25_7b_ft_amazon_vg"]["quantization"] == "bitsandbytes"
+    assert base["family"] == ft["family"] == "chatml"
     # train.py writes outputs/finetune/<dataset>/<base without _fp16>/adapter
     assert ft["adapter"] == f"outputs/finetune/{load_config('ebnerd')['dataset']}/qwen25_7b/adapter"
+    # same hyperparameters as the Amazon Qwen run and as Llama-2; only the batch split differs
+    one = load_config("finetune_qwen25_1gpu")
+    for k in ("epochs", "lr", "scheduler", "warmup_ratio", "weight_decay", "max_grad_norm", "seed"):
+        assert fcfg["train"][k] == one["train"][k] == load_config("finetune")["train"][k], k
+    assert fcfg["lora"] == one["lora"] and fcfg["quant"] == one["quant"]
     # the Llama-2 fine-tuning config is unchanged
     assert load_config("finetune")["base_model"] == "llama2_7b_fp16"
     assert load_config("finetune")["quant"]["compute_dtype"] == "float16"

@@ -106,10 +106,17 @@ class VLLMEngine:
         # "No" far below the top 20; its Yes-No log-odds are about +5)
         kw = {"gpu_memory_utilization": gpu_memory_utilization, "max_logprobs": EXACT_TOPK}
         kw.update(mcfg.get("vllm") or {})  # optional per-model engine options (models.yaml `vllm:`)
+        model, revision = mcfg["hf_id"], mcfg["revision"]
+        if mcfg.get("quantization") == "bitsandbytes" and not Path(model).is_dir():
+            # vLLM's bitsandbytes loader lists the repo's files online even with HF_HUB_OFFLINE=1;
+            # give it the local snapshot instead
+            from huggingface_hub import snapshot_download
+
+            model, revision = snapshot_download(model, revision=revision, local_files_only=True), None
         self.llm = LLM(
-            model=mcfg["hf_id"],
-            revision=mcfg["revision"],
-            tokenizer_revision=mcfg["revision"],
+            model=model,
+            revision=revision,
+            tokenizer_revision=revision,
             quantization=mcfg.get("quantization"),
             dtype=mcfg.get("dtype", "float16"),  # default: 2080 Ti (sm_75) has no bf16
             max_model_len=mcfg["max_model_len"],

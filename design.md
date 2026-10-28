@@ -576,3 +576,32 @@ Evidence: our Mistral runs (dev-direct job 20873, promptcheck job 21054) and the
   - Results are in `results.md`. The shortcut remains: A2 0.000, A4 at chance, A6 at chance, Trap@1 0.90–0.99. The baseline is 0.540 / 0.233 against the old model's 0.433 / 0.413 (hard −0.180\*). A3 0.107 / 0.093 (old 0.007).
   - Interpretation: the impression data still makes "old ⇒ No" a perfect rule, because training golds are cold clicks.
   - Test: 44615 is running.
+- **Qwen2.5-7B on EB-NeRD, main (pool-data) run (2026-10-28, user decision):** we run it on ADA because the pkgpu run did not happen. The impression variant is left for a teammate. The setup is uniform with the Amazon Qwen run (Sanjith, jobs 40320 / 40321 / 42662).
+  - **Amazon Qwen run checked before copying it:**
+    - 12 test numbers recomputed from his raw predictions all match `results.md`;
+    - same pointwise prompts and scoring as ours; his code differs only by the letter-code fix, which affects listwise prompts only;
+    - same answer tokens (`Yes` 9454 / `No` 2753) and the same hyperparameters as Llama-2.
+    - **Caveat:** his Amazon split was built on 13 Oct, from the same items, dates and titles, but sampled different users. Only 677 / 800 cold test users and 27 / 150 dev users are shared with our Llama-2 Amazon pools, so Qwen and Llama-2 on Amazon are compared by the size of their changes, not cell by cell. His adapter cannot be re-scored on our pools, because his training users were not excluded from our test users.
+  - **Recipe (same as his Amazon run):**
+    - base `Qwen/Qwen2.5-7B-Instruct` @ `a09a3545…`, fp16 weights;
+    - QLoRA NF4 with fp16 compute, and the embeddings / `lm_head` kept fp16 (`keep_embeddings_fp16`);
+    - lr 2e-4, 1 epoch, effective batch 32;
+    - the same EB-NeRD training pools as Llama-2 (`train_pools_k15.jsonl`), rendered with Qwen's ChatML template (`sft_train_qwen25_7b_fp16.jsonl`).
+    - **Only the batch split differs:** 4 GPUs × 2 × 4 (EB-NeRD `train_overrides`), against his 1 GPU × 2 × 16.
+  - **Evaluation (same as his Amazon run):** vLLM bitsandbytes 4-bit at load, one GPU per worker (4 workers), `verify_tol` 0.15, for both zero-shot (`qwen25_7b_fp16`) and fine-tuned (`qwen25_7b_ft_ebnerd`). We use our EB-NeRD dev/test pools, the same ones Llama-2 was scored on.
+  - **Code** (ported from his ADA copy):
+    - `train.py`: `keep_embeddings_fp16`;
+    - `merge.py`: the fine-tuned entry keeps its load-time `quantization`;
+    - `engine.py`: bitsandbytes loads from the local snapshot (vLLM otherwise lists the repo online);
+    - `run.py`: per-model `verify_tol`.
+  - **Configs:**
+    - `models.yaml`: `qwen25_7b_fp16`, `qwen25_7b_ft_amazon_vg` (his entries), and `qwen25_7b_ft_ebnerd` re-pointed to this setup (replacing the exploratory pkgpu bf16 entry, which never ran);
+    - new `configs/finetune_qwen25_ada.yaml` and his `configs/finetune_qwen25_1gpu.yaml`;
+    - `test_qwen_finetune_configs_consistent` updated (103 tests pass).
+  - **ADA housekeeping:**
+    - Qwen weights copied from his `~/hf_models` into our `hf_cache` (sha256 of all 4 shards verified), because compute nodes do not mount `/share1`;
+    - to make room, the old checkpoints of the final Llama-2 runs, the Amazon pilot and the stale / NaN impression runs were moved to `/share1/jenik.gajera/ire_archive/finetune/`; the final adapters stay.
+  - **Jobs**, after the Llama-2 impression test 44615 (excluding gnode069, gnode011, gnode053):
+    - **45076:** fine-tune (`FT_CONFIG=finetune_qwen25_ada`);
+    - **45077 / 45078:** `ft-dev` / `ft-test`, `qwen25_7b_ft_ebnerd`;
+    - **45079 / 45080:** the zero-shot `qwen25_7b_fp16` on `ft-dev` / `ft-test`.

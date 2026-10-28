@@ -143,17 +143,45 @@ llama2_7b_ftimp_ebnerd:
   vllm:
     tensor_parallel_size: 2
 
-# Exploratory (pkgpu, one RTX 5000 Ada): Qwen2.5-7B fine-tuned on EB-NeRD; bf16 (15 GB) fits one GPU.
-qwen25_7b_ft_ebnerd:
-  base: qwen25_7b
-  adapter: outputs/finetune/ebnerd/qwen25_7b/adapter
-  dtype: bfloat16              # resolve_adapter keeps this entry's keys, so the base's dtype is repeated
+# --- fine-tuning experiment, Qwen2.5-7B-Instruct (Amazon: 2026-10-26, ada-sanjith; EB-NeRD: 2026-10-28) ---
+# Ungated fp16 base for QLoRA (4-bit at training, as for Llama-2). On one 11 GB GPU vLLM loads the
+# fp16 weights 4-bit at load time (bitsandbytes) instead of TP = 2; the zero-shot reference and the
+# fine-tuned model use the same setting, so before/after see the same quantization. fp16 compute:
+# Turing has no bf16 (check the training loss for overflow).
+qwen25_7b_fp16:
+  hf_id: Qwen/Qwen2.5-7B-Instruct
+  revision: a09a35458c702b33eeacc393d103063234e8bc28
+  allow_patterns: ["*.json", "*.safetensors", "merges.txt"]
+  quantization: bitsandbytes
   family: chatml
   max_model_len: 4096
   listwise: false
   trust_remote_code: false
-  vllm:
-    tensor_parallel_size: 1
+  # fast-vs-exact pointwise check (llm.run --verify-pointwise): bitsandbytes 4-bit adds batch-dependent
+  # rounding, 0.06-0.09 log-odds on these prompts, so the absolute tolerance is 0.15 (default 0.05)
+  verify_tol: 0.15
+
+qwen25_7b_ft_amazon_vg:
+  base: qwen25_7b_fp16
+  adapter: outputs/finetune/amazon_vg/qwen25_7b/adapter   # relative to the project directory
+  quantization: bitsandbytes
+  verify_tol: 0.15                                          # see qwen25_7b_fp16
+  family: chatml
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+
+# Same settings as qwen25_7b_ft_amazon_vg (finetune_qwen25_ada.yaml, 4 GPUs; replaces the earlier
+# exploratory pkgpu bf16 entry, which never ran).
+qwen25_7b_ft_ebnerd:
+  base: qwen25_7b_fp16
+  adapter: outputs/finetune/ebnerd/qwen25_7b/adapter
+  quantization: bitsandbytes
+  verify_tol: 0.15
+  family: chatml
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
 
 # Qwen2.5-7B fine-tuned on EB-NeRD with impression negatives (finetune_qwen25_7b_imp.yaml).
 qwen25_7b_ftimp_ebnerd:

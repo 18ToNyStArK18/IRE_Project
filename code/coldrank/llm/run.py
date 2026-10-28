@@ -290,7 +290,7 @@ def main() -> None:
 
     engine = make_engine(mcfg, args.backend, OUT_DIR / "cache", args.model, args.cache_tag)
     if args.verify_pointwise and any(j["method"] == "pointwise" for j in jobs):
-        verify_pointwise(engine, mcfg["family"], cfg, args.verify_pointwise)
+        verify_pointwise(engine, mcfg["family"], cfg, args.verify_pointwise, tol=mcfg.get("verify_tol", 0.05))
     t0 = time.time()
     for k, j in enumerate(jobs, 1):
         if args.claim_dir and not claim(args.claim_dir, j):

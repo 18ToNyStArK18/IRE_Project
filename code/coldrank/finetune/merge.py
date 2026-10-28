@@ -69,7 +69,8 @@ def resolve_adapter(mcfg: dict) -> dict:
         if not (target / "config.json").exists():
             print(f"[merge] {adapter_dir} into {base['hf_id']} -> {target}", flush=True)
             merge(base, adapter_dir, target)
-    return {**mcfg, "hf_id": str(target), "revision": None, "quantization": None, "adapter_sha": sha,
+    # quantization: the fine-tuned entry's own load-time setting (e.g. bitsandbytes on one 11 GB GPU)
+    return {**mcfg, "hf_id": str(target), "revision": None, "quantization": mcfg.get("quantization"), "adapter_sha": sha,
             "ident_hf_id": f"{base['hf_id']}@{base['revision']}+lora:{sha}"}
 
 

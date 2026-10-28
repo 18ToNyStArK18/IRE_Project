@@ -133,6 +133,11 @@ def main() -> None:
     model.config.use_cache = False
     model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True,
                                             gradient_checkpointing_kwargs={"use_reentrant": False})
+    if qc.get("keep_embeddings_fp16"):
+        # prepare_model_for_kbit_training upcasts every fp16 weight to fp32, including the frozen
+        # input embeddings and lm_head: 2 x 2.2 GB for Qwen2.5's 152k vocabulary (OOM on 11 GB)
+        model.get_input_embeddings().to(dtype)
+        model.get_output_embeddings().to(dtype)
     model = get_peft_model(model, LoraConfig(r=lc["r"], lora_alpha=lc["alpha"], lora_dropout=lc["dropout"],
                                              target_modules=lc["target_modules"], bias="none", task_type="CAUSAL_LM"))
     if local_rank == 0:
