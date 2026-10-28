@@ -94,7 +94,8 @@ def last_token_loss(model, inputs: dict) -> torch.Tensor:
 
 def main() -> None:
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, Trainer, TrainingArguments
+    from transformers import (AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, Trainer, TrainerCallback,
+                              TrainingArguments)
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="amazon_vg")
@@ -149,6 +150,26 @@ def main() -> None:
             loss = last_token_loss(model, inputs)
             return (loss, {"loss": loss}) if return_outputs else loss
 
+    class NanGuard(TrainerCallback):
+        """Fail the job as soon as training diverges (job 43488: fp16 overflow at 46%, then hours of NaN
+        steps). A non-finite loss or eval loss stops it at once. A non-finite grad norm alone can be one
+        step the fp16 grad scaler skips, so it stops only after 3 logs in a row. Every rank sees the same
+        (reduced) values, so all ranks raise together."""
+
+        def __init__(self):
+            self.bad_grad = 0
+
+        def on_log(self, args, state, control, logs=None, **kw):
+            logs = logs or {}
+            for k in ("loss", "eval_loss"):
+                if k in logs and not torch.isfinite(torch.tensor(float(logs[k]))):
+                    raise RuntimeError(f"training diverged at step {state.global_step}: {k}={logs[k]}")
+            if "grad_norm" in logs:
+                ok = torch.isfinite(torch.tensor(float(logs["grad_norm"]))).item()
+                self.bad_grad = 0 if ok else self.bad_grad + 1
+                if self.bad_grad >= 3:
+                    raise RuntimeError(f"training diverged at step {state.global_step}: grad_norm non-finite 3 logs in a row")
+
     targs = TrainingArguments(
         output_dir=str(out / "checkpoints"), num_train_epochs=tc["epochs"], max_steps=args.max_steps,
         per_device_train_batch_size=tc["per_device_batch"], per_device_eval_batch_size=tc["per_device_batch"],
@@ -156,16 +177,21 @@ def main() -> None:
         warmup_ratio=tc["warmup_ratio"], weight_decay=tc["weight_decay"], max_grad_norm=tc["max_grad_norm"],
         fp16=dtype == torch.float16, bf16=dtype == torch.bfloat16, gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False},
         logging_steps=tc["logging_steps"], eval_strategy="steps", eval_steps=tc["eval_steps"],
-        save_strategy="steps", save_steps=tc["save_steps"], save_total_limit=2, seed=tc["seed"],
+        # every checkpoint is kept: job 43488 diverged to NaN at 46% and save_total_limit=2 had already
+        # deleted every checkpoint from before the divergence
+        save_strategy="steps", save_steps=tc["save_steps"], save_total_limit=None, seed=tc["seed"],
         data_seed=tc["seed"], group_by_length=True, remove_unused_columns=False, prediction_loss_only=True,
         ddp_find_unused_parameters=False, dataloader_num_workers=2, report_to="none", label_names=["labels"],
     )
     trainer = LastTokenTrainer(model=model, args=targs, train_dataset=train_ds, eval_dataset=val_ds,
-                               data_collator=partial(collate, pad_id=pad_id))
+                               data_collator=partial(collate, pad_id=pad_id), callbacks=[NanGuard()])
     t0 = time.time()
     resume = any((out / "checkpoints").glob("checkpoint-*")) if (out / "checkpoints").exists() else False
     trainer.train(resume_from_checkpoint=resume or None)
     metrics = trainer.evaluate()
+    bad = [n for n, p in model.named_parameters() if p.requires_grad and not torch.isfinite(p).all()]
+    if bad:  # never save (and so never evaluate) a diverged adapter
+        raise RuntimeError(f"{len(bad)} LoRA tensors are not finite, e.g. {bad[0]}; adapter not saved")
     if trainer.is_world_process_zero():
         model.save_pretrained(out / "adapter")
         summary = {"dataset": cfg["dataset"], "base_model": base_key, "hf_id": mcfg["hf_id"],

@@ -550,3 +550,16 @@ Evidence: our Mistral runs (dev-direct job 20873, promptcheck job 21054) and the
   - **43488:** fine-tune, `FT_CONFIG=finetune_imp`; it rebuilds the SFT files (expected 5,250 instances);
   - **43489:** `ft-dev`, after 43488;
   - **43490:** `ft-test`, after 43489.
+- **Rerun 43488 diverged (2026-10-28):** the fine-tune finished (gnode071, 4 h 42 min, exit 0) on the correct data: 5,250 instances, 27,919 train examples, gold newer than all negatives in 12.7%. But training **diverged to NaN in fp16** at 46% of the epoch.
+  - Validation loss was 0.460 → 0.452 → 0.441 at 11/23/34%. At 46%, grad norm and validation loss became NaN (the grad scaler skipped steps). From 68% on, loss was 0 and grad norm NaN.
+  - **Every saved adapter weight is NaN.** `save_total_limit=2` had kept only checkpoints 800 and 872, both after the divergence, so no healthy checkpoint survived.
+  - Its dev evaluation **43489 failed** after 2 min: vLLM returned no Yes/No logprobs, because the logits were NaN. 43490 was cancelled. The broken run is moved to `outputs/finetune/ebnerd/llama2_7b_imp_nan43488/`.
+  - The pool-data EB-NeRD fine-tune (40929, same hyperparameters, also about 900 steps) logged no NaN, so this is fp16 instability in this run, not a setting that never works.
+- **Decision (2026-10-28, user): retrain with the same settings plus guards.** Hyperparameters are unchanged (lr 2e-4 etc.), so the comparison with the pool-data model stays fair. If it diverges again, fall back to lr 1e-4. `train.py` changes, which do not alter a healthy run:
+  - `save_total_limit=None`: every checkpoint is kept;
+  - a `NanGuard` callback fails the job at the first non-finite loss or validation loss, or at 3 non-finite grad-norm logs in a row (a single non-finite grad norm can be an fp16 scaler skip);
+  - the adapter is not saved if any LoRA weight is non-finite.
+  The SFT files (5,250 instances) are reused. Jobs exclude gnode069, gnode011 and gnode053:
+  - **44352:** fine-tune;
+  - **44353:** `ft-dev`, after 44352;
+  - **44354:** `ft-test`, after 44353.
