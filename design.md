@@ -605,3 +605,4 @@ Evidence: our Mistral runs (dev-direct job 20873, promptcheck job 21054) and the
     - **45076:** fine-tune (`FT_CONFIG=finetune_qwen25_ada`);
     - **45077 / 45078:** `ft-dev` / `ft-test`, `qwen25_7b_ft_ebnerd`;
     - **45079 / 45080:** the zero-shot `qwen25_7b_fp16` on `ft-dev` / `ft-test`.
+- **2026-10-28, impression model test (job 44615).** Scored with the same paired script as dev; every pool has a complete ranking. Test confirms dev on every row: A2 0.001 / 0.000, A3 0.096 / 0.084, A4 0.069 / 0.070, A6 0.157 / 0.123, A1 Trap@1 0.898, A5 0.911 → 0.971. Versus the pool-data model: Baseline +0.092\* random, −0.219\* hard; A1-ctrl −0.109\*. Table appended to `results.md`. Qwen fine-tune 45076 started on gnode082 right after.
