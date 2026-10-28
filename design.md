@@ -563,3 +563,16 @@ Evidence: our Mistral runs (dev-direct job 20873, promptcheck job 21054) and the
   - **44352:** fine-tune;
   - **44353:** `ft-dev`, after 44352;
   - **44354:** `ft-test`, after 44353.
+- **Rerun 44352 diverged again (2026-10-28):** same settings, gnode071. Validation loss was 0.450 at 11%. Then grad norm went NaN at 19% (with the loss jumping to 0.99), and the `NanGuard` stopped the job at step 190 after 1 h 0 min. 44353 and 44354 were cancelled; the run is moved to `llama2_7b_imp_nan44352/`.
+- **Fallback (agreed by the user beforehand): lr 1e-4.** The new config `configs/finetune_imp_lr1e4.yaml` is identical to `finetune_imp.yaml` except `lr: 1.0e-4`. The output dir and model key are unchanged (`llama2_7b_imp`, `llama2_7b_ftimp_ebnerd`).
+  - **Confound for the comparison:** the pool-data model was trained with lr 2e-4, so a difference between the two models can come from the training data or from the learning rate. `train_summary.json` records lr 1e-4.
+  - Jobs:
+    - **44613:** fine-tune, `FT_CONFIG=finetune_imp_lr1e4`;
+    - **44614:** `ft-dev`, after 44613;
+    - **44615:** `ft-test`, after 44614.
+- **Impression model (lr 1e-4) trained and dev-evaluated (2026-10-28):**
+  - Training: 44613, gnode071, 4 h 40 min, exit 0, no NaN; validation loss 0.501 → 0.808 (transient) → 0.439 → … → 0.423.
+  - Dev: 44614 (31 min).
+  - Results are in `results.md`. The shortcut remains: A2 0.000, A4 at chance, A6 at chance, Trap@1 0.90–0.99. The baseline is 0.540 / 0.233 against the old model's 0.433 / 0.413 (hard −0.180\*). A3 0.107 / 0.093 (old 0.007).
+  - Interpretation: the impression data still makes "old ⇒ No" a perfect rule, because training golds are cold clicks.
+  - Test: 44615 is running.

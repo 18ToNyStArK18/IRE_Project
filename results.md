@@ -154,3 +154,34 @@ Running log of results, newest sections appended at the end. Setup and decisions
 - **Fine-tuned:** 0.43 / 0.53, above newest-first, but swapping, hiding or shuffling the dates drops it to about chance, and new-looking items take 60–94% of top spots. It learned some content (A6 hard 0.297), but mostly the recency shortcut.
 - **Same as Llama-2 on Amazon:** fine-tuning with Li et al.'s protocol turns a model that does not use dates into one that mainly follows them, for both base models.
 - **Pool counts differ from the Llama-2 sections** (142 / 962 old-target users instead of 144 / 967, and a different newest-first score on hard negatives), because these pools were built separately on ada. Compare the two models by the size of their changes, not by individual cells.
+
+## Llama-2-7B fine-tuned on EB-NeRD with impression negatives — dev set (2026-10-28)
+
+**Model.** The same Llama-2-7B-Chat, **fine-tuned on EB-NeRD with production-style training data**. For each cold click, the negatives are the articles shown in the same impression that the user did not click (up to 5, any age), instead of our training pools. There are 5,250 instances and 27,919 training examples. In this data, the correct article is newer than all its negatives in only 12.7% of cases.
+- Learning rate **1e-4**, not 2e-4: at 2e-4 the run diverged to NaN in fp16 twice (jobs 43488, 44352). Everything else is unchanged from the pool-data model: QLoRA 4-bit, 1 epoch, pointwise Yes/No, dates shown, batch 32.
+- Training: job 44613, 4 h 40 min, no NaN steps, final validation loss 0.423. Evaluation: job 44614.
+- **Old FT** = the pool-data fine-tune from the EB-NeRD dev section above. **Zero-shot** is reused from that section.
+
+**Evaluation.** As in the EB-NeRD dev section: 150 users per cell (A6 131), K = 15, Recall@1 as random / hard negatives, chance 0.067. **Change** = the new model's paired change against the reference row (Baseline for A2–A6, A1-ctrl for A1/A5); \* = McNemar p < 0.05. Trap@1 chance 0.20.
+
+| Ablation | What it does | Recall@1, zero-shot | Recall@1, old FT (pool data) | Recall@1, new FT (impressions) | Change (new FT) | What the change means |
+|---|---|---|---|---|---|---|
+| Baseline | Li et al.'s protocol: correct article is new; dates shown | 0.100 / 0.073 | 0.433 / 0.413 | 0.540 / 0.233 | +0.440\* / +0.160\* vs zero-shot | Still well above chance, but still **below newest-first** (0.567 / 0.540). Against the old model: random +0.107 (p = 0.09), hard −0.180\* |
+| A2 Swap | correct article's date swapped with an old wrong one's | 0.060 / 0.040 | 0.000 / 0.000 | 0.000 / 0.000 | −0.540\* / −0.233\* | Unchanged: it never picks the correct article once it looks old |
+| A3 Hide | all dates removed | 0.060 / 0.040 | 0.007 / 0.007 | 0.107 / 0.093 | −0.433\* / −0.140\* | Still collapses to about chance. Slightly less total than the old model's 0.007 (+0.100\* / +0.087\* vs old) |
+| A4 Shuffle | dates randomly reassigned among candidates | 0.047 / 0.027 | 0.053 / 0.067 | 0.053 / 0.060 | −0.487\* / −0.173\* | Chance: wrong dates break it completely, as before |
+| A6 All-new | all 15 candidates are new articles | 0.107 / 0.084 | 0.115 / 0.084 | 0.137 / 0.084 | −0.389\* / −0.122\* | Still chance: no usable content signal (old vs new n.s.) |
+| A1-ctrl (old-target reference) | correct article is old; nothing new-looking | 0.020 | 0.247 | 0.147 | — | Worse than the old model (−0.100\*) at finding an *old* correct article |
+| A1 Traps | correct article is old, plus 3 new irrelevant articles | 0.047 | 0.127 | 0.047 | −0.100\* | Traps win **90%** of top spots (old model 77%, chance 20%) |
+| A5 Flood, n = 1 | A1 + 1 old wrong article relabelled new | 0.047 | 0.107 | 0.047 | −0.100\* | Trap@1 0.900 … |
+| A5 Flood, n = 2 | A1 + 2 relabelled | 0.033 | 0.107 | 0.047 | −0.100\* | … 0.907 … |
+| A5 Flood, n = 5 | A1 + 5 relabelled | 0.033 | 0.107 | 0.033 | −0.113\* | … 0.940 … |
+| A5 Flood, n = 10 | A1 + 10 relabelled | 0.027 | 0.100 | 0.007 | −0.140\* | … 0.993: near-total |
+
+**Summary.** Production-style negatives do **not** remove the recency shortcut; if anything the model relies on it more. Swapping the dates still drops it to 0 and shuffling to chance. With only new candidates (A6) it is at chance, and new-looking traps take 90–99% of top spots (old model 77–89%). Hiding dates leaves slightly more than before (0.10 vs 0.007), but that is still about chance.
+
+Likely reason: impression negatives remove the "the gold is the *newest*" cue, but not the "*old* means No" cue. The training instances are cold clicks, so the correct article is always new, while 19.5% of the negatives are old. So an old article is never the right answer in training.
+
+Caveats:
+- The learning rate differs from the old model (1e-4 vs 2e-4).
+- Dev has n = 150; test (job 44615) is pending.

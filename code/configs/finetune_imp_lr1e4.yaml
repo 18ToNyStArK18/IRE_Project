@@ -1,0 +1,31 @@
+# QLoRA fine-tuning (coldrank.finetune.train), impression negatives (coldrank.finetune.impressions;
+# design.md "Production-style training data"). Identical to finetune_imp.yaml except lr 1e-4
+# (design.md: lr 2e-4 diverged to NaN in fp16 on this data, jobs 43488 and 44352).
+# Li et al. (Sec. 3.2.2) fix only "QLoRA, 4-bit, 1 epoch"; the rest are standard QLoRA values.
+base_model: llama2_7b_fp16          # models.yaml key: full-precision weights, quantized to 4 bit at load
+sft_variant: imp                    # SFT files from coldrank.finetune.impressions; output <base>_imp/
+
+quant:
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  compute_dtype: float16            # 2080 Ti (sm_75) has no bf16
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+train:
+  epochs: 1
+  lr: 1.0e-4                        # half of finetune_imp: lr 2e-4 diverged to NaN in fp16 twice (jobs 43488, 44352)
+  scheduler: cosine
+  warmup_ratio: 0.03
+  per_device_batch: 4
+  grad_accum: 2                     # effective batch 4 GPUs x 4 x 2 = 32
+  weight_decay: 0.0
+  max_grad_norm: 0.3
+  seed: 42
+  logging_steps: 10
+  eval_steps: 100
+  save_steps: 100
