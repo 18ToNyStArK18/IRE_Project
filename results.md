@@ -209,3 +209,27 @@ Caveats:
 **Summary.** The test set confirms dev on every row. Production-style (impression) negatives do **not** remove the recency shortcut; the model leans on it slightly more. Swapping dates gives 0, shuffling or hiding them gives about chance, all-new pools are near chance, and new-looking traps take 90–97% of top spots (old model 83–89%). The new model is better on random-negative Baseline (+0.092\*) but much worse on hard negatives (−0.219\*), and in neither case beats newest-first.
 
 Caveats: learning rate 1e-4 vs the old model's 2e-4; single seed; positives are cold clicks only, so "old ⇒ No" is still a perfect rule in training.
+
+## Qwen2.5-7B fine-tuned on EB-NeRD (news) — dev set (2026-10-29)
+
+**Model.** Qwen2.5-7B-Instruct (`Qwen/Qwen2.5-7B-Instruct` @ `a09a3545…`), **fine-tuned on EB-NeRD** with the Amazon Qwen recipe (QLoRA 4-bit NF4, fp16 compute, embeddings kept fp16, LoRA r16 / α32, lr 2e-4, 1 epoch, pointwise Yes/No, dates shown, effective batch 32 as 4 GPUs × 2 × 4). Same training data as the Llama-2 EB-NeRD pool model: 30,018 examples from training pools at 7 earlier cutoffs. Training: job 45076, 4 h 47 min, no NaN steps, final validation loss 0.203. **Zero-shot** = the same base weights without fine-tuning (job 45079); fine-tuned evaluation: job 45540 (the first attempt, 45077, stopped at the pre-run check; see design.md).
+
+**Evaluation.** As for the Amazon Qwen runs: both models loaded 4-bit (vLLM bitsandbytes), so zero-shot vs fine-tuned is like-for-like, but absolute numbers are not strictly comparable with the fp16 Llama-2 rows. EB-NeRD dev, the same pools as the Llama-2 EB-NeRD sections: 150 users per cell (A6 131), K = 15, Recall@1 as random / hard negatives, chance 0.067. Every pool has a complete ranking for both models. **Change** = the fine-tuned model's paired change against the reference row (Baseline for A2–A6, A1-ctrl for A1/A5); \* = McNemar p < 0.05. Trap@1 chance 0.20.
+
+| Ablation | What it does | Recall@1, zero-shot | Recall@1, fine-tuned | Change (fine-tuned) | What the change means |
+|---|---|---|---|---|---|
+| Baseline | Li et al.'s protocol: correct article is new; dates shown | 0.040 / 0.020 | 0.533 / 0.507 | +0.493\* / +0.487\* vs zero-shot | Large gain (8× chance), but still **below newest-first** (0.567 / 0.540) |
+| A2 Swap | correct article's date swapped with an old wrong one's | 0.047 / 0.040 | 0.000 / 0.000 | −0.533\* / −0.507\* | All of the accuracy moves with the date |
+| A3 Hide | all dates removed | 0.073 / 0.060 | 0.020 / 0.020 | −0.513\* / −0.487\* | Below chance without dates |
+| A4 Shuffle | dates randomly reassigned among candidates | 0.060 / 0.040 | 0.080 / 0.053 | −0.453\* / −0.453\* | Chance: wrong dates break it |
+| A6 All-new | all 15 candidates are new articles | 0.137 / 0.122 | 0.214 / 0.221 | −0.328\* / −0.298\* | About 3× chance: some content signal (more than Llama-2's 0.115 / 0.084), but it loses 60% of its accuracy without the date cue |
+| A1-ctrl (old-target reference) | correct article is old; nothing new-looking | 0.040 | 0.213 | — | Reference for the rows below |
+| A1 Traps | correct article is old, plus 3 new irrelevant articles | 0.060 | 0.080 | −0.133\* | Traps take the top spot 87% of the time (zero-shot 10%, chance 20%) |
+| A5 Flood, n = 1 | A1 + 1 old wrong article relabelled new | 0.060 | 0.087 | −0.127\* | Trap@1 0.873 … |
+| A5 Flood, n = 2 | A1 + 2 relabelled | 0.060 | 0.087 | −0.127\* | … 0.880 … |
+| A5 Flood, n = 5 | A1 + 5 relabelled | 0.060 | 0.087 | −0.127\* | … 0.887 … |
+| A5 Flood, n = 10 | A1 + 10 relabelled | 0.087 | 0.093 | −0.120\* | … 0.907 |
+
+**Summary.** Fine-tuned Qwen2.5-7B on news repeats the Llama-2 pattern: 0.53 / 0.51 under Li et al.'s protocol, yet below newest-first; 0 when the correct article's date is swapped; below chance with dates hidden and about chance with dates shuffled; new-looking traps win 87–91% of top spots. With only new candidates (A6) it keeps about 3× chance, so it learned a little more content than Llama-2 did on news.
+- **Zero-shot:** at or below chance on Baseline (0.040 / 0.020) and blind to dates: no A2/A4 change is significant (A3 hard +0.040\* goes *up* without dates). As on Amazon it avoids new items on content: A6 rises to 0.137 / 0.122 (+0.092\* / +0.099\*), and Trap@1 is 0.10 on A1.
+- Dev only (n = 150); test (45080 zero-shot, 45541 fine-tuned) pending.
