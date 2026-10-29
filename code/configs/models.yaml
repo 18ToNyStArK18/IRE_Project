@@ -193,6 +193,7 @@ qwen25_7b_ftimp_ebnerd:
   adapter: outputs/finetune/ebnerd/qwen25_7b_imp/adapter
   quantization: bitsandbytes
   verify_tol: 0.15
+  exact_topk: 150000  # as qwen25_7b_ft_ebnerd (a sharply fine-tuned Qwen puts "Yes" below the top 500)
   family: chatml
   max_model_len: 4096
   listwise: false
