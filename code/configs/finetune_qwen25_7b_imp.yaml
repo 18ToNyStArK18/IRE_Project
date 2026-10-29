@@ -1,14 +1,16 @@
-# QLoRA fine-tuning of Qwen2.5-7B-Instruct on one GPU, impression negatives (coldrank.finetune.impressions;
-# design.md "Production-style training data").
-# Same values as finetune.yaml (Llama-2) except the base model, bf16 compute and the batch split.
-base_model: qwen25_7b               # models.yaml key: full-precision weights, quantized to 4 bit at load
+# Qwen2.5-7B-Instruct on EB-NeRD with impression negatives (coldrank.finetune.impressions; design.md
+# "Production-style training data"): exactly the recipe of the Qwen pool-data runs (Amazon:
+# finetune_qwen25_1gpu.yaml, job 40320; EB-NeRD: finetune_qwen25_ada.yaml, job 45076), on one GPU
+# (pkgpu) as for Amazon. Identical to finetune_qwen25_1gpu.yaml plus the two keys below.
+base_model: qwen25_7b_fp16          # models.yaml key: full-precision weights, quantized to 4 bit at load
 sft_variant: imp                    # SFT files from coldrank.finetune.impressions; output <base>_imp/
-dataset_train_overrides: false      # its 8 x 4 batch is sized for one 32 GB GPU: ignore finetune.train_overrides
+dataset_train_overrides: false      # keep 1 GPU x 2 x 16 = 32 (EB-NeRD's override would make it 2 x 4 = 8)
 
 quant:
   bnb_4bit_quant_type: nf4
   bnb_4bit_use_double_quant: true
-  compute_dtype: bfloat16           # RTX 5000 Ada (sm_89) has bf16, Qwen2.5's training dtype
+  compute_dtype: float16            # 2080 Ti (sm_75) has no bf16
+  keep_embeddings_fp16: true        # frozen embeddings / lm_head stay fp16 (Qwen2.5: 152k vocab, else OOM)
 
 lora:
   r: 16
@@ -21,8 +23,8 @@ train:
   lr: 2.0e-4
   scheduler: cosine
   warmup_ratio: 0.03
-  per_device_batch: 8
-  grad_accum: 4                     # effective batch 1 GPU x 8 x 4 = 32, as for Llama-2
+  per_device_batch: 2
+  grad_accum: 16                    # effective batch 1 GPU x 2 x 16 = 32 (same as 4 GPUs x 4 x 2)
   weight_decay: 0.0
   max_grad_norm: 0.3
   seed: 42

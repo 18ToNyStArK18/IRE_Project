@@ -183,14 +183,14 @@ qwen25_7b_ft_ebnerd:
   listwise: false
   trust_remote_code: false
 
-# Qwen2.5-7B fine-tuned on EB-NeRD with impression negatives (finetune_qwen25_7b_imp.yaml).
+# Qwen2.5-7B fine-tuned on EB-NeRD with impression negatives (finetune_qwen25_7b_imp.yaml): same
+# settings as qwen25_7b_ft_ebnerd, so the zero-shot, pool-data and impression models compare directly.
 qwen25_7b_ftimp_ebnerd:
-  base: qwen25_7b
+  base: qwen25_7b_fp16
   adapter: outputs/finetune/ebnerd/qwen25_7b_imp/adapter
-  dtype: bfloat16
+  quantization: bitsandbytes
+  verify_tol: 0.15
   family: chatml
   max_model_len: 4096
   listwise: false
   trust_remote_code: false
-  vllm:
-    tensor_parallel_size: 1

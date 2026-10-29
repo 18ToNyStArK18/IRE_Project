@@ -267,10 +267,10 @@ def test_train_settings_override_precedence():
     llama, qwen = load_config("finetune"), load_config("finetune_qwen25_7b")
     # Llama-2: EB-NeRD's batch shape applies (4 GPUs x 2 x 4 = 32), as in job 40929
     assert {k: train_settings(eb, llama)[k] for k in ("per_device_batch", "grad_accum")} == {"per_device_batch": 2, "grad_accum": 4}
-    # Qwen on one GPU keeps its own 8 x 4 = 32
-    for name in ("finetune_qwen25_7b", "finetune_qwen25_7b_imp"):
+    # Qwen on one GPU keeps its own batch split (effective 32)
+    for name, split in (("finetune_qwen25_7b", (8, 4)), ("finetune_qwen25_7b_imp", (2, 16))):
         tc = train_settings(eb, load_config(name))
-        assert (tc["per_device_batch"], tc["grad_accum"]) == (8, 4)
+        assert (tc["per_device_batch"], tc["grad_accum"]) == split
     assert train_settings(load_config("amazon_vg"), llama) == llama["train"]
     assert qwen["dataset_train_overrides"] is False
 
@@ -279,13 +279,18 @@ def test_impression_finetune_configs_consistent():
     models, eb = load_config("models"), load_config("ebnerd")
     for ft_name, model in (("finetune_imp", "llama2_7b_ftimp_ebnerd"), ("finetune_qwen25_7b_imp", "qwen25_7b_ftimp_ebnerd")):
         fcfg = load_config(ft_name)
-        pool_cfg = load_config("finetune" if ft_name == "finetune_imp" else "finetune_qwen25_7b")
+        # Qwen: the 1-GPU recipe of the Qwen pool-data runs (Amazon 40320; EB-NeRD on 4 GPUs, 45076)
+        pool_cfg = load_config("finetune" if ft_name == "finetune_imp" else "finetune_qwen25_1gpu")
         assert fcfg["sft_variant"] == "imp" and models[model]["base"] == fcfg["base_model"]
-        # identical training recipe to the pool-data config, apart from the data variant
-        assert {k: v for k, v in fcfg.items() if k != "sft_variant"} == pool_cfg
+        # identical training recipe to the pool-data config, apart from the data variant (and, for
+        # Qwen on one GPU, ignoring EB-NeRD's 4-GPU batch override)
+        assert {k: v for k, v in fcfg.items() if k not in ("sft_variant", "dataset_train_overrides")} == pool_cfg
         # train.py writes outputs/finetune/<dataset>/<base without _fp16>_<variant>/adapter
         assert models[model]["adapter"] == \
             f"outputs/finetune/{eb['dataset']}/{fcfg['base_model'].replace('_fp16', '')}_imp/adapter"
+    # evaluated as the Qwen pool-data model (4-bit at load, same tolerance)
+    ft, pool = models["qwen25_7b_ftimp_ebnerd"], models["qwen25_7b_ft_ebnerd"]
+    assert {k: v for k, v in ft.items() if k != "adapter"} == {k: v for k, v in pool.items() if k != "adapter"}
     icfg = imp_cfg(eb)
     cuts = check_cutoffs(icfg)
     assert cuts[0] == "2023-05-18" and len(cuts) == 7 and icfg["finetune"]["max_instances_per_cutoff"] == 750
