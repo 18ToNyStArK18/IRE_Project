@@ -233,3 +233,28 @@ Caveats: learning rate 1e-4 vs the old model's 2e-4; single seed; positives are 
 **Summary.** Fine-tuned Qwen2.5-7B on news repeats the Llama-2 pattern: 0.53 / 0.51 under Li et al.'s protocol, yet below newest-first; 0 when the correct article's date is swapped; below chance with dates hidden and about chance with dates shuffled; new-looking traps win 87–91% of top spots. With only new candidates (A6) it keeps about 3× chance, so it learned a little more content than Llama-2 did on news.
 - **Zero-shot:** at or below chance on Baseline (0.040 / 0.020) and blind to dates: no A2/A4 change is significant (A3 hard +0.040\* goes *up* without dates). As on Amazon it avoids new items on content: A6 rises to 0.137 / 0.122 (+0.092\* / +0.099\*), and Trap@1 is 0.10 on A1.
 - Dev only (n = 150); test (45080 zero-shot, 45541 fine-tuned) pending.
+
+## Qwen2.5-7B fine-tuned on EB-NeRD (news) — test set (2026-10-29)
+
+**Model.** The same fine-tuned Qwen2.5-7B-Instruct as in the dev section above (job 45076), with the same 4-bit evaluation setting. Evaluation jobs: fine-tuned 46038 (resubmission of 45541, which failed on a full node-local disk before scoring anything), zero-shot 45080.
+
+**Evaluation.** EB-NeRD test, the same pools as the Llama-2 EB-NeRD test sections: 800 users per cold-target cell (Baseline, A2–A4), 650 for A6, 1,000 per old-target cell (A1-ctrl, A1, A5). K = 15, Recall@1 as random / hard negatives, chance 0.067. Every pool has a complete ranking for both models. **Change** = the fine-tuned model's paired change against the reference row (Baseline for A2–A6, A1-ctrl for A1/A5); \* = McNemar p < 0.05. Trap@1 chance 0.20.
+
+| Ablation | What it does | Recall@1, zero-shot | Recall@1, fine-tuned | Change (fine-tuned) | What the change means |
+|---|---|---|---|---|---|
+| Baseline | Li et al.'s protocol: correct article is new; dates shown | 0.044 / 0.036 | 0.492 / 0.539 | +0.449\* / +0.502\* vs zero-shot | 7–8× chance. Below newest-first on random negatives (0.560); on hard negatives just above it (0.515) |
+| A2 Swap | correct article's date swapped with an old wrong one's | 0.062 / 0.050 | 0.000 / 0.001 | −0.492\* / −0.537\* | All of the accuracy moves with the date |
+| A3 Hide | all dates removed | 0.058 / 0.043 | 0.011 / 0.010 | −0.481\* / −0.529\* | Below chance without dates |
+| A4 Shuffle | dates randomly reassigned among candidates | 0.054 / 0.041 | 0.048 / 0.043 | −0.445\* / −0.496\* | Chance: wrong dates break it |
+| A6 All-new | all 15 candidates are new articles | 0.143 / 0.091 | 0.214 / 0.222 | −0.286\* / −0.317\* | About 3× chance: some content signal (Llama-2 on news: 0.097 / 0.117), but it loses about 60% of its accuracy without the date cue |
+| A1-ctrl (old-target reference) | correct article is old; nothing new-looking | 0.061 | 0.249 | — | Reference for the rows below |
+| A1 Traps | correct article is old, plus 3 new irrelevant articles | 0.073 | 0.087 | −0.162\* | Traps take the top spot 86% of the time (zero-shot 7%, chance 20%) |
+| A5 Flood, n = 1 | A1 + 1 old wrong article relabelled new | 0.073 | 0.085 | −0.164\* | Trap@1 0.872 … |
+| A5 Flood, n = 2 | A1 + 2 relabelled | 0.073 | 0.087 | −0.162\* | … 0.874 … |
+| A5 Flood, n = 5 | A1 + 5 relabelled | 0.075 | 0.084 | −0.165\* | … 0.881 … |
+| A5 Flood, n = 10 | A1 + 10 relabelled | 0.103 | 0.088 | −0.161\* | … 0.909 |
+
+**Summary.** Test replicates dev in every row (same signs, similar sizes, every fine-tuned change p < 1e-35).
+- **Fine-tuned:** 0.49 / 0.54 under Li et al.'s protocol, but 0 when the correct article's date is swapped, below chance with dates hidden, chance with dates shuffled, and new-looking traps win 86–91% of top spots. With only new candidates it keeps about 3× chance, a little more content than Llama-2 learned on news.
+- **Zero-shot:** at chance on Baseline (0.044 / 0.036) and not using dates the way the fine-tuned model does: swapping dates *raises* it slightly (+0.019\* / +0.014\*), A6 rises (+0.089\* / +0.046\*), and Trap@1 is 0.07 on A1.
+- **With this section the recency shortcut is shown on test for both base models (Llama-2-7B, Qwen2.5-7B) on both datasets (Amazon VG, EB-NeRD).**
