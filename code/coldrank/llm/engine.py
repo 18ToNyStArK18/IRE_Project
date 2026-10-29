@@ -103,8 +103,11 @@ class VLLMEngine:
         self.SamplingParams = SamplingParams
         self.cfg = mcfg
         # max_logprobs: the exact pointwise reference needs deep top-k lists (Llama-2-7B puts
-        # "No" far below the top 20; its Yes-No log-odds are about +5)
-        kw = {"gpu_memory_utilization": gpu_memory_utilization, "max_logprobs": EXACT_TOPK}
+        # "No" far below the top 20; its Yes-No log-odds are about +5). A sharply fine-tuned model can put
+        # one answer below the top 500 (Qwen2.5-7B fine-tuned on EB-NeRD: about -18, job 45077), so
+        # models.yaml `exact_topk` can deepen the list for that model
+        self.exact_topk = mcfg.get("exact_topk", EXACT_TOPK)
+        kw = {"gpu_memory_utilization": gpu_memory_utilization, "max_logprobs": self.exact_topk}
         kw.update(mcfg.get("vllm") or {})  # optional per-model engine options (models.yaml `vllm:`)
         model, revision = mcfg["hf_id"], mcfg["revision"]
         if mcfg.get("quantization") == "bitsandbytes" and not Path(model).is_dir():
@@ -157,11 +160,11 @@ class VLLMEngine:
         return res
 
     def yes_no_exact(self, prompts: list[str]) -> list[float]:
-        """Reference for yes_no(): one unrestricted greedy step returning the top-EXACT_TOPK
+        """Reference for yes_no(): one unrestricted greedy step returning the top-exact_topk
         logprobs over the FULL vocabulary, i.e. the model's exact log p(t | prompt). Returns NaN
         for a prompt where a Yes/No spelling falls outside them. (Prompt logprobs would be the
         other way, but in vLLM 0.8.5 V0 they crash when prefix caching is on.)"""
-        sp = self.SamplingParams(max_tokens=1, temperature=0.0, logprobs=EXACT_TOPK)
+        sp = self.SamplingParams(max_tokens=1, temperature=0.0, logprobs=self.exact_topk)
         outs = self.llm.generate(prompts, sp, use_tqdm=True)
         res = []
         for o in outs:

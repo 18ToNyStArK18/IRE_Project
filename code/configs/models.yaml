@@ -178,6 +178,9 @@ qwen25_7b_ft_ebnerd:
   adapter: outputs/finetune/ebnerd/qwen25_7b/adapter
   quantization: bitsandbytes
   verify_tol: 0.15
+  # its log-odds on wrong candidates are about -18, so "Yes" falls below the default top-500 list
+  # the exact check reads (job 45077); 150,000 of Qwen2.5's 152,064 logits covers it
+  exact_topk: 150000
   family: chatml
   max_model_len: 4096
   listwise: false

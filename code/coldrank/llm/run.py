@@ -209,10 +209,10 @@ def verify_pointwise(engine, family: str, cfg: dict, n: int, tol: float = 0.05, 
     hist_len = cfg["prompt"]["history_len"]["pointwise"]
     prompts = [format_chat(family, *render_pointwise(pool, c, hist_len, domain_of(cfg))) for c in pool["candidates"][:n]]
     fast, exact = engine.engine.yes_no(prompts), engine.engine.yes_no_exact(prompts)
-    pairs = [(a, b) for a, b in zip(fast, exact) if b == b]  # exact is NaN if Yes/No not in top-20
+    pairs = [(a, b) for a, b in zip(fast, exact) if b == b]  # exact is NaN if a Yes/No spelling is outside the exact top-k list
     print(json.dumps({"verify_pointwise_n": n, "comparable": len(pairs), "fast": fast[:4], "exact": exact[:4]}))
     if len(pairs) < max(1, n // 2):
-        raise SystemExit(f"only {len(pairs)}/{n} prompts had both Yes and No in the top-500: cannot verify")
+        raise SystemExit(f"only {len(pairs)}/{n} prompts had both Yes and No in the exact top-k list: cannot verify")
     diff = max(abs(a - b) for a, b in pairs)
     # fp16 logits are rounded to steps that grow with their size (1/32 near 16), so the tolerance is
     # absolute + relative: Llama-2's log-odds are ~+5 (diffs <= 0.02), Qwen2.5-32B's ~+13..+16 (0.0625)
