@@ -1,0 +1,32 @@
+# Qwen2.5-7B-Instruct on EB-NeRD with impression negatives, on ADA (4 x 2080 Ti, DDP): exactly the
+# Qwen pool-data EB-NeRD run (finetune_qwen25_ada.yaml, job 45076) apart from the data variant, so
+# the two Qwen EB-NeRD models differ only in their negatives. finetune_qwen25_7b_imp.yaml is the same
+# recipe on one GPU (pkgpu); the effective batch is 32 in both.
+sft_variant: imp                    # SFT files from coldrank.finetune.impressions; output <base>_imp/
+base_model: qwen25_7b_fp16          # models.yaml key: full-precision weights, quantized to 4 bit at load
+
+quant:
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  compute_dtype: float16            # 2080 Ti (sm_75) has no bf16
+  keep_embeddings_fp16: true        # frozen embeddings / lm_head stay fp16 (Qwen2.5: 152k vocab, else OOM)
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+train:
+  epochs: 1
+  lr: 2.0e-4
+  scheduler: cosine
+  warmup_ratio: 0.03
+  per_device_batch: 4
+  grad_accum: 2                     # effective batch 4 GPUs x 4 x 2 = 32
+  weight_decay: 0.0
+  max_grad_norm: 0.3
+  seed: 42
+  logging_steps: 10
+  eval_steps: 100
+  save_steps: 100

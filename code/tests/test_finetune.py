@@ -288,6 +288,11 @@ def test_impression_finetune_configs_consistent():
         # train.py writes outputs/finetune/<dataset>/<base without _fp16>_<variant>/adapter
         assert models[model]["adapter"] == \
             f"outputs/finetune/{eb['dataset']}/{fcfg['base_model'].replace('_fp16', '')}_imp/adapter"
+    # ADA (4 GPUs): the Qwen EB-NeRD pool-data config (job 45076) plus the data variant; same output dir
+    ada = load_config("finetune_qwen25_ada_imp")
+    assert {k: v for k, v in ada.items() if k != "sft_variant"} == load_config("finetune_qwen25_ada")
+    assert ada["sft_variant"] == "imp" and "dataset_train_overrides" not in ada  # EB-NeRD's 2 x 4 x 4 GPUs = 32
+    assert ada["base_model"] == load_config("finetune_qwen25_7b_imp")["base_model"]
     # evaluated as the Qwen pool-data model (4-bit at load, same tolerance)
     ft, pool = models["qwen25_7b_ftimp_ebnerd"], models["qwen25_7b_ft_ebnerd"]
     assert {k: v for k, v in ft.items() if k != "adapter"} == {k: v for k, v in pool.items() if k != "adapter"}
