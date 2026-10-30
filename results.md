@@ -258,3 +258,56 @@ Caveats: learning rate 1e-4 vs the old model's 2e-4; single seed; positives are 
 - **Fine-tuned:** 0.49 / 0.54 under Li et al.'s protocol, but 0 when the correct article's date is swapped, below chance with dates hidden, chance with dates shuffled, and new-looking traps win 86–91% of top spots. With only new candidates it keeps about 3× chance, a little more content than Llama-2 learned on news.
 - **Zero-shot:** at chance on Baseline (0.044 / 0.036) and not using dates the way the fine-tuned model does: swapping dates *raises* it slightly (+0.019\* / +0.014\*), A6 rises (+0.089\* / +0.046\*), and Trap@1 is 0.07 on A1.
 - **With this section the recency shortcut is shown on test for both base models (Llama-2-7B, Qwen2.5-7B) on both datasets (Amazon VG, EB-NeRD).**
+
+## Qwen2.5-7B fine-tuned on EB-NeRD with impression negatives — dev set (2026-10-30)
+
+**Model.** Qwen2.5-7B-Instruct, **fine-tuned on EB-NeRD with the impression-negative training data** used for the Llama-2 impression model: 5,250 cold clicks with up to 5 shown-but-not-clicked articles each, 27,919 training examples; the correct article is newer than all its negatives in only 12.7% of cases.
+- Recipe identical to the Qwen EB-NeRD pool-data model (lr 2e-4, QLoRA 4-bit, 1 epoch, pointwise Yes/No, dates shown, batch 32); only the negatives differ. Unlike Llama-2, it did not diverge at 2e-4, so there is no learning-rate confound here.
+- Training: job 46950, 4 h 15 min, no NaN steps, final validation loss 0.423. Evaluation: job 46951 (pointwise check passed on 8/8 prompts, max difference 0.031).
+- **Old FT** = the Qwen pool-data fine-tune (`qwen25_7b_ft_ebnerd`) from the Qwen EB-NeRD dev section above. **Zero-shot** is reused from that section (job 45079).
+
+**Evaluation.** As in the Qwen EB-NeRD dev section: both models 4-bit, 150 users per cell (A6 131), K = 15, Recall@1 as random / hard negatives, chance 0.067. Every pool has a complete ranking. **Change** = the new model's paired change against the reference row (Baseline for A2–A6, A1-ctrl for A1/A5); \* = McNemar p < 0.05. Trap@1 chance 0.20.
+
+| Ablation | What it does | Recall@1, zero-shot | Recall@1, old FT (pool data) | Recall@1, new FT (impressions) | Change (new FT) | What the change means |
+|---|---|---|---|---|---|---|
+| Baseline | Li et al.'s protocol: correct article is new; dates shown | 0.040 / 0.020 | 0.533 / 0.507 | 0.407 / 0.167 | +0.367\* / +0.147\* vs zero-shot | Lower than the old model (−0.127\* / −0.340\*) and well **below newest-first** (0.567 / 0.540) |
+| A2 Swap | correct article's date swapped with an old wrong one's | 0.047 / 0.040 | 0.000 / 0.000 | 0.000 / 0.000 | −0.407\* / −0.167\* | Unchanged: it never picks the correct article once it looks old |
+| A3 Hide | all dates removed | 0.073 / 0.060 | 0.020 / 0.020 | 0.067 / 0.053 | −0.340\* / −0.113\* | Chance (old vs new n.s.) |
+| A4 Shuffle | dates randomly reassigned among candidates | 0.060 / 0.040 | 0.080 / 0.053 | 0.053 / 0.067 | −0.353\* / −0.100\* | Chance: wrong dates break it, as before |
+| A6 All-new | all 15 candidates are new articles | 0.137 / 0.122 | 0.214 / 0.221 | 0.084 / 0.053 | −0.321\* / −0.107\* | Falls to chance: the old model's content signal is gone (−0.130\* / −0.168\* vs old) |
+| A1-ctrl (old-target reference) | correct article is old; nothing new-looking | 0.040 | 0.213 | 0.160 | — | Slightly worse than the old model (−0.053, n.s.) |
+| A1 Traps | correct article is old, plus 3 new irrelevant articles | 0.060 | 0.080 | 0.027 | −0.133\* | Traps win **89%** of top spots (old model 87%, chance 20%) |
+| A5 Flood, n = 1 | A1 + 1 old wrong article relabelled new | 0.060 | 0.087 | 0.027 | −0.133\* | Trap@1 0.900 … |
+| A5 Flood, n = 2 | A1 + 2 relabelled | 0.060 | 0.087 | 0.027 | −0.133\* | … 0.913 … |
+| A5 Flood, n = 5 | A1 + 5 relabelled | 0.060 | 0.087 | 0.027 | −0.133\* | … 0.927 … |
+| A5 Flood, n = 10 | A1 + 10 relabelled | 0.087 | 0.093 | 0.013 | −0.147\* | … 0.987: near-total |
+
+**Summary.** Same result as for Llama-2: production-style negatives do **not** remove the recency shortcut. Swapping the dates still gives 0, hiding or shuffling them gives chance, and new-looking traps take 89–99% of top spots. Here it also costs accuracy: the baseline drops (hard negatives 0.507 → 0.167), and the all-new A6 score, the one place the pool-data Qwen showed some content signal, falls to chance. So the impression model is less useful and no less date-driven.
+- Same likely reason as for Llama-2: in training the correct article is always new, while some negatives are old, so "old means No" is still a perfect rule.
+- Dev only (n = 150); the test set (next section) confirms it, except that A6 stays above chance on random negatives.
+
+## Qwen2.5-7B fine-tuned on EB-NeRD with impression negatives — test set (2026-10-30)
+
+**Model.** The impression-negative model from the dev section above (lr 2e-4, job 46950), with the same 4-bit evaluation setting. Test job 46952 (6 h 38 min, pointwise check passed on 8/8 prompts, max difference 0.031). **Old FT** = the Qwen pool-data fine-tune `qwen25_7b_ft_ebnerd`; **zero-shot** = `qwen25_7b_fp16`, both on the same test pools.
+
+**Evaluation.** EB-NeRD test: 800 users per cold-target cell (Baseline, A2–A4), 650 for A6, 1,000 per old-target cell (A1-ctrl, A1, A5). K = 15, Recall@1 as random / hard negatives, chance 0.067. Every pool has a complete ranking. **Change** = the new model's paired change against the reference row (Baseline for A2–A6, A1-ctrl for A1/A5); \* = McNemar p < 0.05. Trap@1 chance 0.20.
+
+| Ablation | What it does | Recall@1, zero-shot | Recall@1, old FT (pool data) | Recall@1, new FT (impressions) | Change (new FT) | What the change means |
+|---|---|---|---|---|---|---|
+| Baseline | Li et al.'s protocol: correct article is new; dates shown | 0.044 / 0.036 | 0.492 / 0.539 | 0.406 / 0.194 | +0.362\* / +0.158\* vs zero-shot | Lower than the old model (−0.086\* / −0.345\*) and well **below newest-first** (0.560 / 0.515) |
+| A2 Swap | correct article's date swapped with an old wrong one's | 0.062 / 0.050 | 0.000 / 0.001 | 0.003 / 0.003 | −0.404\* / −0.191\* | Unchanged: it almost never picks the correct article once it looks old |
+| A3 Hide | all dates removed | 0.058 / 0.043 | 0.011 / 0.010 | 0.048 / 0.036 | −0.359\* / −0.158\* | Below chance, though less far below than the old model (+0.036\* / +0.026\* vs old) |
+| A4 Shuffle | dates randomly reassigned among candidates | 0.054 / 0.041 | 0.048 / 0.043 | 0.054 / 0.048 | −0.352\* / −0.146\* | Chance: wrong dates break it, as before (old vs new n.s.) |
+| A6 All-new | all 15 candidates are new articles | 0.143 / 0.091 | 0.214 / 0.222 | 0.128 / 0.088 | −0.278\* / −0.105\* | About 2× chance on random, near chance on hard; no better than zero-shot and below the old model (−0.086\* / −0.134\*) |
+| A1-ctrl (old-target reference) | correct article is old; nothing new-looking | 0.061 | 0.249 | 0.176 | — | Worse than the old model (−0.073\*) at finding an *old* correct article |
+| A1 Traps | correct article is old, plus 3 new irrelevant articles | 0.073 | 0.087 | 0.039 | −0.137\* | Traps win **89%** of top spots (old model 86%, chance 20%) |
+| A5 Flood, n = 1 | A1 + 1 old wrong article relabelled new | 0.073 | 0.085 | 0.032 | −0.144\* | Trap@1 0.907 … |
+| A5 Flood, n = 2 | A1 + 2 relabelled | 0.073 | 0.087 | 0.028 | −0.148\* | … 0.922 … |
+| A5 Flood, n = 5 | A1 + 5 relabelled | 0.075 | 0.084 | 0.020 | −0.156\* | … 0.945 … |
+| A5 Flood, n = 10 | A1 + 10 relabelled | 0.103 | 0.088 | 0.016 | −0.160\* | … 0.980: near-total |
+
+**Summary.** Test confirms dev: impression negatives do **not** remove the recency shortcut in Qwen either. Swapping the dates gives about 0, hiding or shuffling them gives chance or below, and new-looking traps take 89–98% of top spots (old model 86–91%).
+- **It also costs accuracy.** The baseline falls, most on hard negatives (0.539 → 0.194), and every old-target row is significantly lower than the old model. The new model is further below newest-first than the old one.
+- **Correction to dev:** on dev, A6 looked like chance on both kinds of negatives (0.084 / 0.053, n = 131). On test it is 0.128 on random negatives, about 2× chance, and 0.088 on hard. Either way it is no better than zero-shot (0.143 / 0.091) and below the pool-data model (0.214 / 0.222), so what the pool-data model learned on A6 did not survive the change of negatives.
+- **Comparison with Llama-2:** both impression models keep the shortcut and lose on hard negatives (Llama-2 −0.219\*, Qwen −0.345\*). They differ on random negatives (Llama-2 +0.092\*, Qwen −0.086\*). Qwen used the same lr as its pool-data model, so its change comes from the negatives alone; Llama-2's also includes the lr change.
+- Single seed.
