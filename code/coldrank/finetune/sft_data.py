@@ -9,8 +9,12 @@ train / validation (`finetune.holdout_frac`, seeded by user id).
 Outputs (in <split dir>/finetune/): sft_train.jsonl, sft_val.jsonl, sft_stats.json for Llama-2
 (`llama2_7b_fp16`); sft_{train,val}_<model>.jsonl, sft_stats_<model>.json for any other model
 
+`--variant nodates` (dates-hidden control, design.md): the same pools, candidates and users, with
+every displayed date removed as in A3; files sft_{train,val}_<model>_nodates.jsonl.
+
 Usage:
     python -m coldrank.finetune.sft_data --config amazon_vg --model llama2_7b_fp16
+    python -m coldrank.finetune.sft_data --config amazon_vg --model llama2_7b_fp16 --variant nodates
 """
 
 from __future__ import annotations
@@ -41,10 +45,17 @@ def sft_paths(fd: Path, model: str, variant: str = "") -> tuple[Path, Path, Path
 
 
 def sft_dir(cfg: dict, variant: str = "") -> Path:
-    """Directory of the SFT files: <split>/finetune/, or <split>/finetune/impressions/ for "imp"."""
-    if variant not in ("", "imp"):
+    """Directory of the SFT files: <split>/finetune/ (also "nodates"), or <split>/finetune/impressions/ for "imp"."""
+    if variant not in ("", "imp", "nodates"):
         raise ValueError(f"unknown sft_variant {variant!r}")
     return ft_dir(cfg) / "impressions" if variant == "imp" else ft_dir(cfg)
+
+
+def hide_dates(pool: dict) -> dict:
+    """The pool with every displayed date removed, as make_a3_hide does at evaluation. pool_id and
+    candidate order are kept, so the same candidates and users are selected as in the dated data."""
+    return {**pool, "history": [{**h, "date": None} for h in pool["history"]],
+            "candidates": [{**c, "date": None} for c in pool["candidates"]]}
 
 
 def select_candidates(pool: dict, n_warm: int) -> list[dict]:
@@ -87,6 +98,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="amazon_vg")
     ap.add_argument("--model", default="llama2_7b_fp16", help="models.yaml key: tokenizer and chat format")
+    ap.add_argument("--variant", default="", choices=["", "nodates"], help="nodates: dates-hidden control")
     args = ap.parse_args()
     cfg = load_config(args.config)
     mcfg = load_config("models")[args.model]
@@ -97,16 +109,18 @@ def main() -> None:
 
     fd = ft_dir(cfg)
     pools = list(read_jsonl(fd / "train_pools_k15.jsonl"))
+    if args.variant == "nodates":
+        pools = [hide_dates(p) for p in pools]
     rows = build_examples(pools, cfg, mcfg["family"], count, mcfg["max_model_len"])
     frac = float(cfg["finetune"]["holdout_frac"])
     val = [r for r in rows if is_holdout(r["user_id"], frac)]
     train = [r for r in rows if not is_holdout(r["user_id"], frac)]
-    train_path, val_path, stats_path = sft_paths(fd, args.model)
+    train_path, val_path, stats_path = sft_paths(fd, args.model, args.variant)
     write_jsonl(train_path, train)
     write_jsonl(val_path, val)
     lens = np.array([count(r["prompt"]) for r in rows])
     stats = {
-        "model": args.model, "n_pools": len(pools), "n_train": len(train), "n_val": len(val),
+        "model": args.model, "variant": args.variant, "n_pools": len(pools), "n_train": len(train), "n_val": len(val),
         "n_users_train": len({r["user_id"] for r in train}), "n_users_val": len({r["user_id"] for r in val}),
         "positive_rate": float(np.mean([r["label"] == "Yes" for r in rows])),
         "roles": {k: sum(r["role"] == k for r in rows) for k in (GOLD, COLD_NEG, WARM)},

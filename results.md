@@ -315,3 +315,60 @@ Caveats: learning rate 1e-4 vs the old model's 2e-4; single seed; positives are 
 ## Correction: Trap@1 chance on the A5 rows (2026-10-30)
 
 The sections above give "Trap@1 chance 0.20". That holds only for **A1** (3 trap items out of 15). In A5 the relabelled items also count as traps (`TRAP_ROLES` in `eval/metrics.py`), so chance rises with n: **n = 1: 0.267, n = 2: 0.333, n = 5: 0.533, n = 10: 0.867** (counted from the EB-NeRD test pools: 4, 5, 8 and 13 of 15). So the rise in Trap@1 across A5 is partly just more traps in the pool, and Trap@1 at n = 10 is a weak signal, e.g. "0.98: near-total" is only modestly above 0.867. A1 is the row to cite. The Recall@1 numbers are not affected.
+
+## Llama-2-7B dates-hidden control, fine-tuned on Amazon Video Games — dev set (2026-10-30)
+
+**Model.** Llama-2-7B-Chat fine-tuned on Amazon VG with the same recipe, pools, users and holdout as the date-trained model in the first section, except that **no training prompt shows a date** (23,778 examples; job 48200, 1 h 25 min, no NaN steps, final validation loss 0.283, date-trained 0.240). Evaluation job 48742 (16 min, pointwise check passed on 8/8 prompts, max difference 0.016). **Date-trained** = the model from the first section.
+
+**Evaluation.** Amazon VG dev, the same pools as the first section: 150 users per cold-target cell, 144 per old-target cell. K = 15, Recall@1 as random / hard negatives, chance 0.067. Every pool has a complete ranking. **Change** = the control's paired change against the reference row (Baseline for A2–A6, A1-ctrl for A1/A5); **vs date-trained** = control minus date-trained on the same pools; \* = McNemar p < 0.05. Trap@1 chance: A1 0.20; A5 n = 1, 2, 5, 10: 0.267, 0.333, 0.533, 0.867. **Only A3 matches the format the control was trained on**; every other row shows it dates it never saw in training.
+
+| Ablation | What it does | Recall@1, date-trained | Recall@1, control | Change (control) | vs date-trained | Trap@1, date-trained → control |
+|---|---|---|---|---|---|---|
+| Baseline | correct item is new; dates shown | 0.373 / 0.460 | 0.327 / 0.313 | — | −0.047 / −0.147\* | — |
+| A2 Swap | correct item's date swapped with an old wrong one's | 0.007 / 0.007 | 0.107 / 0.107 | −0.220\* / −0.207\* | +0.100\* / +0.100\* | — |
+| A3 Hide | all dates removed | 0.093 / 0.087 | 0.227 / 0.260 | −0.100\* / −0.053 | +0.133\* / +0.173\* | — |
+| A4 Shuffle | dates randomly reassigned among candidates | 0.093 / 0.060 | 0.207 / 0.207 | −0.120\* / −0.107\* | +0.113\* / +0.147\* | — |
+| A6 All-new | all 15 candidates are new | 0.240 / 0.280 | 0.187 / 0.253 | −0.140\* / −0.060 | −0.053 / −0.027 | — |
+| A1-ctrl (old-target reference) | correct item is old; nothing new-looking | 0.389 | 0.347 | — | −0.042 | 0.104 → 0.076 |
+| A1 Traps | correct item is old, plus 3 new irrelevant items | 0.139 | 0.090 | −0.257\* | −0.049 | 0.528 → 0.472 |
+| A5 Flood, n = 1 | A1 + 1 old wrong item relabelled new | 0.125 | 0.090 | −0.257\* | −0.035 | 0.632 → 0.549 |
+| A5 Flood, n = 2 | A1 + 2 relabelled | 0.083 | 0.090 | −0.257\* | +0.007 | 0.688 → 0.569\* |
+| A5 Flood, n = 5 | A1 + 5 relabelled | 0.062 | 0.076 | −0.271\* | +0.014 | 0.826 → 0.736\* |
+| A5 Flood, n = 10 | A1 + 10 relabelled | 0.042 | 0.076 | −0.271\* | +0.035 | 0.951 → 0.903 |
+
+Newest-first on these pools: 0.347 / 0.307.
+
+**Summary.** Training without dates weakens the shortcut but does not remove it.
+- **Without dates it keeps real skill:** A3 is 0.227 / 0.260, against 0.093 / 0.087 for the date-trained model. So the date-trained A3 row understates how much the training teaches beyond dates.
+- **It still follows dates it never saw in training:** swapping the dates costs it −0.220\* / −0.207\*, and new-looking traps take 47% of top spots on A1 (chance 20%). Why is not established. The format shift may play a part, but the swap result shows the displayed dates themselves move it.
+- **It costs accuracy where dates are real:** the Baseline falls on hard negatives (−0.147\*), and the control only matches newest-first.
+- Dev only (n = 150 / 144), single seed; test pending (job 48743).
+
+## Llama-2-7B dates-hidden control, fine-tuned on Amazon Video Games — test set (2026-10-31)
+
+**Model.** The dates-hidden control from the dev section above (job 48200). Evaluation job 48743 (1 h 14 min, pointwise check passed on 8/8 prompts, max difference 0.016). **Date-trained** = the model from the Amazon test section (job 40143, evaluation 41008).
+
+**Evaluation.** Amazon VG test, the same pools as the date-trained test section: 800 users per cold-target cell (A6 799), 967 per old-target cell. K = 15, Recall@1 as random / hard negatives, chance 0.067. Every pool has a complete ranking. **Change** = the control's paired change against the reference row (Baseline for A2–A6, A1-ctrl for A1/A5); **vs date-trained** = control minus date-trained on the same pools; \* = McNemar p < 0.05. Trap@1 chance: A1 0.20; A5 n = 1, 2, 5, 10: 0.267, 0.333, 0.533, 0.867. **Only A3 matches the format the control was trained on**; every other row shows it dates it never saw in training.
+
+| Ablation | What it does | Recall@1, date-trained | Recall@1, control | Change (control) | vs date-trained | Trap@1, date-trained → control |
+|---|---|---|---|---|---|---|
+| Baseline | correct item is new; dates shown | 0.445 / 0.546 | 0.299 / 0.345 | — | −0.146\* / −0.201\* | — |
+| A2 Swap | correct item's date swapped with an old wrong one's | 0.005 / 0.006 | 0.084 / 0.100 | −0.215\* / −0.245\* | +0.079\* / +0.094\* | — |
+| A3 Hide | all dates removed | 0.101 / 0.107 | 0.234 / 0.282 | −0.065\* / −0.062\* | +0.133\* / +0.175\* | — |
+| A4 Shuffle | dates randomly reassigned among candidates | 0.077 / 0.077 | 0.204 / 0.217 | −0.095\* / −0.128\* | +0.126\* / +0.140\* | — |
+| A6 All-new | all 15 candidates are new | 0.253 / 0.292 | 0.193 / 0.278 | −0.106\* / −0.068\* | −0.060\* / −0.014 | — |
+| A1-ctrl (old-target reference) | correct item is old; nothing new-looking | 0.384 | 0.331 | — | −0.053\* | 0.127 → 0.155\* |
+| A1 Traps | correct item is old, plus 3 new irrelevant items | 0.152 | 0.126 | −0.205\* | −0.026\* | 0.562 → 0.501\* |
+| A5 Flood, n = 1 | A1 + 1 old wrong item relabelled new | 0.103 | 0.118 | −0.213\* | +0.014 | 0.675 → 0.555\* |
+| A5 Flood, n = 2 | A1 + 2 relabelled | 0.084 | 0.116 | −0.215\* | +0.032\* | 0.737 → 0.602\* |
+| A5 Flood, n = 5 | A1 + 5 relabelled | 0.067 | 0.105 | −0.225\* | +0.038\* | 0.845 → 0.744\* |
+| A5 Flood, n = 10 | A1 + 10 relabelled | 0.060 | 0.098 | −0.233\* | +0.038\* | 0.930 → 0.883\* |
+
+Newest-first on these pools: 0.346 / 0.323. Control minus newest-first: −0.048 (p = 0.05) / +0.022 (n.s.).
+
+**Summary.** Test confirms dev with more power: training without dates weakens the recency shortcut but does not remove it, and it costs accuracy.
+- **Real skill without dates:** on A3 the control reaches 0.234 / 0.282, against 0.101 / 0.107 for the date-trained model. That is about 45% of the date-trained model's Baseline gain above chance. So the date-trained A3 row (a model tested on a format it never saw) understates what the training teaches beyond dates.
+- **The shortcut remains:** swapping dates takes it to about chance (0.084 / 0.100), and new-looking traps take 50% of top spots on A1 (date-trained 56%, chance 20%). The Trap@1 reductions are significant on every A1 and A5 row, but it stays well above chance on A1 and on A5 up to n = 5 (A5 chance rises with n).
+- **It reacts to dates it never saw in training.** Showing correct dates raises it above A3 (+0.065\* / +0.062\*), and swapped dates lower it well below A3. The zero-shot model barely reacts to dates, so this date sensitivity comes with fine-tuning even when the training prompts contain no dates. Why is not established. Titles are unchanged, so a year inside a title could still carry date information during training; this has not been tested.
+- **The cost:** Baseline falls by −0.146\* / −0.201\*, and the control no longer beats newest-first (−0.048 at p = 0.05 / +0.022 n.s.), whereas the date-trained model does (0.445 / 0.546 vs 0.346 / 0.323).
+- Hiding dates in training is a diagnostic control and not a fix: production prompts show dates, and the model still follows them. Single seed.

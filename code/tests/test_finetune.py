@@ -5,10 +5,11 @@ import pandas as pd
 import pytest
 
 from coldrank.adversarial.common import COLD_NEG, GOLD, WARM
+from coldrank.adversarial.date_variants import make_a3_hide
 from coldrank.common import load_config
 from coldrank.finetune.impressions import IMP_NEG, attach_negatives, date_cue, imp_cfg
 from coldrank.finetune.impressions import build_examples as build_imp_examples
-from coldrank.finetune.sft_data import is_holdout, pointwise_prompt, select_candidates, sft_dir, sft_paths
+from coldrank.finetune.sft_data import hide_dates, is_holdout, pointwise_prompt, select_candidates, sft_dir, sft_paths
 from coldrank.finetune.trainpools import check_cutoffs, k15_pools, neg_setting, training_instances
 from coldrank.llm.chat import format_chat
 from coldrank.pools.build import Embeddings, build_pools, candidate_record, check_pool, history_records
@@ -299,3 +300,33 @@ def test_impression_finetune_configs_consistent():
     icfg = imp_cfg(eb)
     cuts = check_cutoffs(icfg)
     assert cuts[0] == "2023-05-18" and len(cuts) == 7 and icfg["finetune"]["max_instances_per_cutoff"] == 750
+
+
+def test_nodates_prompts_match_a3_inference():
+    items, emb, inst, topk = _world50(1)
+    cfg_pool = {"pool": {"n_warm": 40, "n_cold": 10, "neg_settings": ["random", "hard"], "dup_threshold": 0.99,
+                         "profile_len": 20}}
+    pool = k15_pools(build_pools(inst, topk, items, emb, {}, T, cfg_pool)[0])[0]
+    cfg = {"prompt": {"history_len": {"pointwise": 20}}}
+    hidden, a3 = hide_dates(pool), make_a3_hide(pool)
+    a3_cands = {c["item_id"]: c for c in a3["candidates"]}
+    assert pool["candidates"][0]["date"] and pool["history"][0]["date"]  # the input pool is left alone
+    assert hidden["pool_id"] == pool["pool_id"]
+    # the same candidates are selected as in the dated data
+    assert [c["item_id"] for c in select_candidates(hidden, 3)] == [c["item_id"] for c in select_candidates(pool, 3)]
+    for c in hidden["candidates"]:
+        prompt, _ = pointwise_prompt(hidden, c, cfg, "llama2", len, 10**6)
+        assert prompt == format_chat("llama2", *render_pointwise(a3, a3_cands[c["item_id"]], 20))
+        assert "launch date" not in prompt
+
+
+def test_nodates_finetune_config_consistent(tmp_path):
+    fcfg, models = load_config("finetune_nodates"), load_config("models")
+    assert fcfg["sft_variant"] == "nodates"
+    assert {k: v for k, v in fcfg.items() if k != "sft_variant"} == load_config("finetune")
+    ctrl, main = models["llama2_7b_ftnodates_amazon_vg"], models["llama2_7b_ft_amazon_vg"]
+    assert {k: v for k, v in ctrl.items() if k != "adapter"} == {k: v for k, v in main.items() if k != "adapter"}
+    assert ctrl["adapter"] == "outputs/finetune/amazon_vg/llama2_7b_nodates/adapter"
+    assert not set(sft_paths(tmp_path, "llama2_7b_fp16", "nodates")) & set(sft_paths(tmp_path, "llama2_7b_fp16"))
+    world = {"dataset": "x", "cutoff_T": "2023-05-25", "window_days": 1}
+    assert sft_dir(world, "nodates") == sft_dir(world)

@@ -143,6 +143,18 @@ llama2_7b_ftimp_ebnerd:
   vllm:
     tensor_parallel_size: 2
 
+# Dates-hidden control (finetune_nodates.yaml): llama2_7b_ft_amazon_vg's data and settings with every
+# displayed date removed from the training prompts; evaluated on A3 (design.md).
+llama2_7b_ftnodates_amazon_vg:
+  base: llama2_7b_fp16
+  adapter: outputs/finetune/amazon_vg/llama2_7b_nodates/adapter
+  family: llama2
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 2
+
 # --- fine-tuning experiment, Qwen2.5-7B-Instruct (Amazon: 2026-10-26, ada-sanjith; EB-NeRD: 2026-10-28) ---
 # Ungated fp16 base for QLoRA (4-bit at training, as for Llama-2). On one 11 GB GPU vLLM loads the
 # fp16 weights 4-bit at load time (bitsandbytes) instead of TP = 2; the zero-shot reference and the
