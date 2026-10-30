@@ -311,3 +311,7 @@ Caveats: learning rate 1e-4 vs the old model's 2e-4; single seed; positives are 
 - **Correction to dev:** on dev, A6 looked like chance on both kinds of negatives (0.084 / 0.053, n = 131). On test it is 0.128 on random negatives, about 2× chance, and 0.088 on hard. Either way it is no better than zero-shot (0.143 / 0.091) and below the pool-data model (0.214 / 0.222), so what the pool-data model learned on A6 did not survive the change of negatives.
 - **Comparison with Llama-2:** both impression models keep the shortcut and lose on hard negatives (Llama-2 −0.219\*, Qwen −0.345\*). They differ on random negatives (Llama-2 +0.092\*, Qwen −0.086\*). Qwen used the same lr as its pool-data model, so its change comes from the negatives alone; Llama-2's also includes the lr change.
 - Single seed.
+
+## Correction: Trap@1 chance on the A5 rows (2026-10-30)
+
+The sections above give "Trap@1 chance 0.20". That holds only for **A1** (3 trap items out of 15). In A5 the relabelled items also count as traps (`TRAP_ROLES` in `eval/metrics.py`), so chance rises with n: **n = 1: 0.267, n = 2: 0.333, n = 5: 0.533, n = 10: 0.867** (counted from the EB-NeRD test pools: 4, 5, 8 and 13 of 15). So the rise in Trap@1 across A5 is partly just more traps in the pool, and Trap@1 at n = 10 is a weak signal, e.g. "0.98: near-total" is only modestly above 0.867. A1 is the row to cite. The Recall@1 numbers are not affected.
