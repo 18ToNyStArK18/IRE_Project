@@ -102,19 +102,13 @@ def k15_pools(pools50: list[dict]) -> list[dict]:
     return out
 
 
-def build_cutoff(cfg: dict, cutoff: str, device: str, topn: int = 100) -> dict:
-    """Steps 1-3 for one cutoff; writes cutoff_<T'>/ and returns its stats."""
+def rank_and_pool(cfg: dict, inst: list[dict], items: pd.DataFrame, pos: pd.DataFrame, T: int, out: Path, device: str,
+                  cutoff: str, topn: int = 100) -> tuple[list[dict], dict, float]:
+    """Steps 2-3 up to the K = 50 pools for a list of instances: writes sasrec_report.json and the
+    embeddings to `out`; returns (K = 50 pools, pool step stats, SASRec best validation NDCG@10)."""
     from coldrank.warm.sasrec import build_sequences, kcore, topk_for_instances, train
 
     sd = split_dir(cfg)
-    out = ft_dir(cfg) / f"cutoff_{cutoff_tag(cutoff)}"
-    out.mkdir(parents=True, exist_ok=True)
-    items = pd.read_parquet(sd / "items.parquet")
-    pos = pd.read_parquet(sd / "positives.parquet")
-    T = date_to_ts(cutoff)
-
-    inst, stats = training_instances(pos, items, cfg, cutoff, eval_users(sd))
-
     hp = cfg["sasrec"]
     pre = pos[pos["ts"] < T]
     train_df = kcore(pre, hp["kcore"])
@@ -140,13 +134,27 @@ def build_cutoff(cfg: dict, cutoff: str, device: str, topn: int = 100) -> dict:
 
     pop = pre.groupby("item_id").size().to_dict()
     pools50, pstats = build_pools(inst, {r["instance_id"]: r["items"] for r in topk}, items, emb, pop, T, cfg)
+    return pools50, pstats, max(c["val_ndcg10"] for c in curve)
+
+
+def build_cutoff(cfg: dict, cutoff: str, device: str, topn: int = 100) -> dict:
+    """Steps 1-3 for one cutoff; writes cutoff_<T'>/ and returns its stats."""
+    sd = split_dir(cfg)
+    out = ft_dir(cfg) / f"cutoff_{cutoff_tag(cutoff)}"
+    out.mkdir(parents=True, exist_ok=True)
+    items = pd.read_parquet(sd / "items.parquet")
+    pos = pd.read_parquet(sd / "positives.parquet")
+    T = date_to_ts(cutoff)
+
+    inst, stats = training_instances(pos, items, cfg, cutoff, eval_users(sd))
+    pools50, pstats, best = rank_and_pool(cfg, inst, items, pos, T, out, device, cutoff, topn)
     for p in pools50:
         check_pool(p, cfg["pool"]["n_warm"], cfg["pool"]["n_cold"])
     pools = k15_pools(pools50)
     write_jsonl(out / "pools_k15.jsonl", pools)
     stats.update(cutoff_T=ts_to_date(T), pool_step=pstats, n_pools=len(pools),
                  n_random=sum(p["neg_setting"] == "random" for p in pools),
-                 sasrec_best_val_ndcg10=max(c["val_ndcg10"] for c in curve),
+                 sasrec_best_val_ndcg10=best,
                  summary=pool_summary(pools) if pools else {})
     (out / "stats.json").write_text(json.dumps(stats, indent=2))
     print(json.dumps({k: v for k, v in stats.items() if k != "summary"}), flush=True)

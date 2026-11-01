@@ -9,7 +9,7 @@ is computed as if unpadded and only the last position's logits are materialized.
 Run with torchrun (one model copy per GPU):
     torchrun --nproc_per_node 4 -m coldrank.finetune.train --config amazon_vg
     python -m coldrank.finetune.train --config ebnerd --ft-config finetune_qwen25_7b   # one GPU
-Output: outputs/finetune/<dataset>/<base>[_<sft_variant>]/ (adapter/, checkpoints/, train_summary.json)
+Output: outputs/finetune/<dataset>/<base>[_<sft_variant>][_<run_tag>]/ (adapter/, checkpoints/, train_summary.json)
 An ft config with `sft_variant: imp` trains on the impression-negative examples
 (coldrank.finetune.impressions) instead of the pool examples (coldrank.finetune.sft_data).
 """
@@ -109,7 +109,8 @@ def main() -> None:
     tc, lc, qc = train_settings(cfg, fcfg), fcfg["lora"], fcfg["quant"]
     fcfg = {**fcfg, "train": tc}  # recorded in train_summary.json as used
     variant = fcfg.get("sft_variant", "")  # "imp": impression negatives (finetune.impressions)
-    out = OUT_DIR / "finetune" / cfg["dataset"] / (base_key.replace("_fp16", "") + (f"_{variant}" if variant else ""))
+    run_tag = fcfg.get("run_tag", "")  # the same data with another training seed, e.g. "s43"
+    out = OUT_DIR / "finetune" / cfg["dataset"] / "_".join(x for x in (base_key.replace("_fp16", ""), variant, run_tag) if x)
     if args.max_steps > 0 or args.limit:
         out = out.parent / f"{out.name}_pilot"  # never mistake a pilot for the real adapter
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
@@ -182,9 +183,9 @@ def main() -> None:
         warmup_ratio=tc["warmup_ratio"], weight_decay=tc["weight_decay"], max_grad_norm=tc["max_grad_norm"],
         fp16=dtype == torch.float16, bf16=dtype == torch.bfloat16, gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False},
         logging_steps=tc["logging_steps"], eval_strategy="steps", eval_steps=tc["eval_steps"],
-        # every checkpoint is kept: job 43488 diverged to NaN at 46% and save_total_limit=2 had already
-        # deleted every checkpoint from before the divergence
-        save_strategy="steps", save_steps=tc["save_steps"], save_total_limit=None, seed=tc["seed"],
+        # every checkpoint is kept by default: job 43488 diverged to NaN at 46% and save_total_limit=2 had
+        # already deleted every checkpoint from before the divergence
+        save_strategy="steps", save_steps=tc["save_steps"], save_total_limit=tc.get("save_total_limit"), seed=tc["seed"],
         data_seed=tc["seed"], group_by_length=True, remove_unused_columns=False, prediction_loss_only=True,
         ddp_find_unused_parameters=False, dataloader_num_workers=2, report_to="none", label_names=["labels"],
     )

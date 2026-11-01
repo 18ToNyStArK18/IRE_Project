@@ -3,8 +3,8 @@ fine-tuned model like any other.
 
 A models.yaml entry with `base` and `adapter` is resolved here (called by llm.run): the merged
 weights go to node-local disk (13.5 GB per model; $COLDRANK_MERGED_DIR, default
-/ssd_scratch/$USER/coldrank_merged), one directory per adapter content hash, built once per node
-under a file lock. The generation cache identifies the model by base + adapter hash, never by
+/ssd_scratch/$USER/coldrank_merged, or /scratch if the SSD has too little room: job 49867 stopped on
+a full /ssd_scratch), one directory per adapter content hash, built once per node under a file lock. The generation cache identifies the model by base + adapter hash, never by
 the local path.
 
 Usage (optional: llm.run merges on first use):
@@ -23,13 +23,16 @@ from pathlib import Path
 from coldrank.common import PROJECT_DIR, load_config
 
 ADAPTER_FILES = ("adapter_config.json", "adapter_model.safetensors")
+MIN_FREE_BYTES = 20 * 1024**3  # one merged model plus margin
+LOCAL_DISKS = ("/ssd_scratch", "/scratch")
 
 
 def merged_root() -> Path:
     if os.environ.get("COLDRANK_MERGED_DIR"):
         return Path(os.environ["COLDRANK_MERGED_DIR"])
-    if Path("/ssd_scratch").is_dir():
-        return Path("/ssd_scratch") / os.environ.get("USER", "user") / "coldrank_merged"
+    for disk in LOCAL_DISKS:
+        if Path(disk).is_dir() and shutil.disk_usage(disk).free >= MIN_FREE_BYTES:
+            return Path(disk) / os.environ.get("USER", "user") / "coldrank_merged"
     return PROJECT_DIR / "merged"
 
 

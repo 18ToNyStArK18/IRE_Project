@@ -372,3 +372,121 @@ Newest-first on these pools: 0.346 / 0.323. Control minus newest-first: −0.048
 - **It reacts to dates it never saw in training.** Showing correct dates raises it above A3 (+0.065\* / +0.062\*), and swapped dates lower it well below A3. The zero-shot model barely reacts to dates, so this date sensitivity comes with fine-tuning even when the training prompts contain no dates. Why is not established. Titles are unchanged, so a year inside a title could still carry date information during training; this has not been tested.
 - **The cost:** Baseline falls by −0.146\* / −0.201\*, and the control no longer beats newest-first (−0.048 at p = 0.05 / +0.022 n.s.), whereas the date-trained model does (0.445 / 0.546 vs 0.346 / 0.323).
 - Hiding dates in training is a diagnostic control and not a fix: production prompts show dates, and the model still follows them. Single seed.
+
+## Llama-2-7B with old correct answers mixed into training (the fix), Amazon Video Games — dev set (2026-10-31)
+
+**Model.** Llama-2-7B-Chat fine-tuned on Amazon VG with the date-trained recipe and **dates shown**, but half of each cutoff's training pools have an **old** correct item (4,183 pools: 2,092 new-answer, 2,091 old-answer; 23,802 training examples). In the training file a new item is correct 20.0% of the time and an old item 14.3% (date-trained data: 33% and 0%). Job 49600, 1 h 41 min, no NaN steps, final validation loss 0.335 (date-trained 0.240, on different validation data). Evaluation job 49601 (pointwise check 8/8, max difference 0.016). **Date-trained** = the model from the first section.
+
+**Evaluation.** Amazon VG dev, the same pools as the first section: 150 users per cold-target cell, 144 per old-target cell. K = 15, Recall@1 as random / hard negatives, chance 0.067. Every pool has a complete ranking. **Change** = the fix's paired change against the reference row (Baseline for A2–A6, A1-ctrl for A1/A5); **vs date-trained** = fix minus date-trained on the same pools; \* = McNemar p < 0.05. Trap@1 chance: A1 0.20; A5 n = 1, 2, 5, 10: 0.267, 0.333, 0.533, 0.867.
+
+| Ablation | What it does | Recall@1, date-trained | Recall@1, fix | Change (fix) | vs date-trained | Trap@1, date-trained → fix |
+|---|---|---|---|---|---|---|
+| Baseline | correct item is new; dates shown | 0.373 / 0.460 | 0.267 / 0.260 | — | −0.107\* / −0.200\* | — |
+| A2 Swap | correct item's date swapped with an old wrong one's | 0.007 / 0.007 | 0.080 / 0.080 | −0.187\* / −0.180\* | +0.073\* / +0.073\* | — |
+| A3 Hide | all dates removed | 0.093 / 0.087 | 0.127 / 0.147 | −0.140\* / −0.113\* | +0.033 / +0.060 | — |
+| A4 Shuffle | dates randomly reassigned among candidates | 0.093 / 0.060 | 0.100 / 0.093 | −0.167\* / −0.167\* | +0.007 / +0.033 | — |
+| A6 All-new | all 15 candidates are new | 0.240 / 0.280 | 0.207 / 0.313 | −0.060 / +0.053 | −0.033 / +0.033 | — |
+| A1-ctrl (old-target reference) | correct item is old; nothing new-looking | 0.389 | 0.326 | — | −0.062 | 0.104 → 0.146 |
+| A1 Traps | correct item is old, plus 3 new irrelevant items | 0.139 | 0.236 | −0.090\* | +0.097\* | 0.528 → **0.271\*** |
+| A5 Flood, n = 1 | A1 + 1 old wrong item relabelled new | 0.125 | 0.236 | −0.090\* | +0.111\* | 0.632 → 0.333\* |
+| A5 Flood, n = 2 | A1 + 2 relabelled | 0.083 | 0.188 | −0.139\* | +0.104\* | 0.688 → 0.451\* |
+| A5 Flood, n = 5 | A1 + 5 relabelled | 0.062 | 0.160 | −0.167\* | +0.097\* | 0.826 → 0.667\* |
+| A5 Flood, n = 10 | A1 + 10 relabelled | 0.042 | 0.146 | −0.181\* | +0.104\* | 0.951 → 0.819\* |
+
+Newest-first on these pools: 0.347 / 0.307.
+
+**Summary.** Mixing old correct answers into training sharply reduces the pull of new-looking items, but the model still depends on dates when the correct item is new.
+- **Traps lose most of their pull:** A1 Trap@1 falls from 0.528 to 0.271 (chance 0.20), and Recall@1 on the same pools rises from 0.139 to 0.236. A5 improves on every row; at n = 10 Trap@1 (0.819) is below chance (0.867).
+- **Relevance signals survive:** A6 (0.207 / 0.313) and A1-ctrl (0.326) are not significantly below the date-trained model.
+- **Dates still matter:** swap, hide and shuffle still drop the Baseline significantly, and only A2 improves against the date-trained model. A3 and A4 are not significantly better.
+- **The cost:** Baseline falls to 0.267 / 0.260, below newest-first. Some of that drop is the shortcut's inflated score going away, but this run cannot separate it from lost skill.
+- Dev only (n = 150 / 144), single seed; test pending (job 49882).
+
+## Llama-2-7B with old correct answers mixed into training (the fix), Amazon Video Games — test set (2026-10-31)
+
+**Model.** The fix model from the dev section above (job 49600). Evaluation job 49882 (1 h 38 min, pointwise check passed on 8/8 prompts, max difference 0.016). **Date-trained** = the model from the Amazon test section (job 40143, evaluation 41008).
+
+**Evaluation.** Amazon VG test, the same pools as the date-trained test section: 800 users per cold-target cell (A6 799), 967 per old-target cell. K = 15, Recall@1 as random / hard negatives, chance 0.067. Every pool has a complete ranking. **Change** = the fix's paired change against the reference row (Baseline for A2–A6, A1-ctrl for A1/A5); **vs date-trained** = fix minus date-trained on the same pools; \* = McNemar p < 0.05. Trap@1 chance: A1 0.20; A5 n = 1, 2, 5, 10: 0.267, 0.333, 0.533, 0.867.
+
+| Ablation | What it does | Recall@1, date-trained | Recall@1, fix | Change (fix) | vs date-trained | Trap@1, date-trained → fix |
+|---|---|---|---|---|---|---|
+| Baseline | correct item is new; dates shown | 0.445 / 0.546 | 0.296 / 0.334 | — | −0.149\* / −0.212\* | — |
+| A2 Swap | correct item's date swapped with an old wrong one's | 0.005 / 0.006 | 0.068 / 0.091 | −0.229\* / −0.242\* | +0.062\* / +0.085\* | — |
+| A3 Hide | all dates removed | 0.101 / 0.107 | 0.164 / 0.191 | −0.133\* / −0.142\* | +0.062\* / +0.084\* | — |
+| A4 Shuffle | dates randomly reassigned among candidates | 0.077 / 0.077 | 0.126 / 0.136 | −0.170\* / −0.198\* | +0.049\* / +0.059\* | — |
+| A6 All-new | all 15 candidates are new | 0.253 / 0.292 | 0.194 / 0.273 | −0.103\* / −0.061\* | −0.059\* / −0.019 | — |
+| A1-ctrl (old-target reference) | correct item is old; nothing new-looking | 0.384 | 0.308 | — | −0.075\* | 0.127 → 0.147 |
+| A1 Traps | correct item is old, plus 3 new irrelevant items | 0.152 | 0.236 | −0.072\* | +0.084\* | 0.562 → **0.278\*** |
+| A5 Flood, n = 1 | A1 + 1 old wrong item relabelled new | 0.103 | 0.226 | −0.082\* | +0.123\* | 0.675 → 0.373\* |
+| A5 Flood, n = 2 | A1 + 2 relabelled | 0.084 | 0.214 | −0.094\* | +0.130\* | 0.737 → 0.465\* |
+| A5 Flood, n = 5 | A1 + 5 relabelled | 0.067 | 0.180 | −0.128\* | +0.113\* | 0.845 → 0.646\* |
+| A5 Flood, n = 10 | A1 + 10 relabelled | 0.060 | 0.168 | −0.141\* | +0.108\* | 0.930 → 0.810\* |
+
+Newest-first on these pools: 0.346 / 0.323. Fix minus newest-first: −0.050\* (p = 0.03) / +0.011 (n.s.).
+
+**Against the dates-hidden control** (test section above, same pools): Baseline is the same (−0.003 / −0.011, n.s.), Trap@1 is much lower on A1 (0.278 vs 0.501\*) and lower on every A5 row\*, and A3 is lower (0.164 / 0.191 vs 0.234 / 0.282\*).
+
+**Summary.** Test confirms dev: the fix reduces the recency shortcut a lot but does not remove it, and it costs accuracy.
+- **Traps lose most of their pull:** A1 Trap@1 falls from 0.562 to 0.278, so the excess over chance (0.20) falls from 0.362 to 0.078. Traps now cost −0.072\* in Recall@1, against −0.232 for the date-trained model. Trap@1 is still significantly above chance on A1 and on A5 up to n = 5 (each p < 1e-8), and below chance at n = 10 (0.810 vs 0.867, p < 1e-6).
+- **Dates still dominate when the correct item is new:** swapping the dates takes it to about chance (0.068 / 0.091), and hiding or shuffling them still costs −0.133\* to −0.198\*.
+- **Better without dates, unlike dev:** A3 and A4 are significantly above the date-trained model on test (they were not on dev, with n = 150).
+- **Relevance signals drop a little, also unlike dev:** A1-ctrl is −0.075\* and A6 is −0.059\* / −0.019 against the date-trained model. Dev's "not significantly below" did not hold at the larger n, except for A6 on hard negatives.
+- **The cost:** Baseline falls by −0.149\* / −0.212\*, and the fix does not beat newest-first (−0.050\* / +0.011 n.s.). Some of that drop is the shortcut's inflated score going away, but this run cannot separate it from lost skill.
+- **Not fully date-neutral by design:** in the training file a new item is still correct more often than an old one (20.0% vs 14.3%), so some remaining preference for new items is expected. Single seed, Amazon only.
+
+## Llama-2-7B date-trained model across three training seeds — test set, both datasets (2026-11-01)
+
+**Models.** The date-trained Llama-2-7B-Chat on each dataset, seed 42 (the models in the earlier test sections) plus new seeds 43 and 44. The SFT data and all settings are the same, so only training randomness varies (LoRA initialisation, shuffling, dropout), not the data sampling. Amazon: training 49603, 49605; evaluation 49604, 49606. EB-NeRD: training 49607, 49609; evaluation 49608, 51516. All pointwise checks passed on 8/8 prompts (max difference 0.016).
+
+**Evaluation.** The same test pools as the earlier sections. Amazon: 800 users per cold-target cell (A6 799), 967 per old-target cell. EB-NeRD: 800 per cold-target cell (A6 650), 1,000 per old-target cell. K = 15, Recall@1 as random / hard negatives, chance 0.067. Every pool has a complete ranking. Each cell gives seeds 42, 43, 44, then the mean and standard deviation (SD) of the three. Trap@1 chance: A1 0.20; A5 n = 1, 2, 5, 10: 0.267, 0.333, 0.533, 0.867.
+
+### Amazon Video Games
+
+| Ablation | Random: 42, 43, 44 | Random: mean ± SD | Hard: 42, 43, 44 | Hard: mean ± SD |
+|---|---|---|---|---|
+| Baseline | 0.445, 0.430, 0.459 | 0.445 ± 0.014 | 0.546, 0.516, 0.535 | 0.532 ± 0.015 |
+| A2 Swap | 0.005, 0.005, 0.006 | 0.005 ± 0.001 | 0.006, 0.007, 0.007 | 0.007 ± 0.001 |
+| A3 Hide | 0.101, 0.104, 0.119 | 0.108 ± 0.009 | 0.107, 0.111, 0.130 | 0.116 ± 0.012 |
+| A4 Shuffle | 0.077, 0.085, 0.092 | 0.085 ± 0.007 | 0.077, 0.070, 0.087 | 0.078 ± 0.009 |
+| A6 All-new | 0.253, 0.233, 0.267 | 0.251 ± 0.017 | 0.292, 0.275, 0.302 | 0.290 ± 0.013 |
+
+| Ablation | Recall@1: 42, 43, 44 | Recall@1: mean ± SD | Trap@1: 42, 43, 44 | Trap@1: mean ± SD |
+|---|---|---|---|---|
+| A1-ctrl | 0.384, 0.363, 0.374 | 0.374 ± 0.010 | 0.127, 0.126, 0.114 | 0.122 ± 0.007 |
+| A1 Traps | 0.152, 0.156, 0.150 | 0.153 ± 0.003 | 0.562, 0.551, 0.567 | 0.560 ± 0.008 |
+| A5 n = 1 | 0.103, 0.112, 0.105 | 0.107 ± 0.004 | 0.675, 0.658, 0.669 | 0.667 ± 0.009 |
+| A5 n = 2 | 0.084, 0.097, 0.092 | 0.091 ± 0.007 | 0.737, 0.713, 0.725 | 0.725 ± 0.012 |
+| A5 n = 5 | 0.067, 0.075, 0.074 | 0.072 ± 0.005 | 0.845, 0.842, 0.828 | 0.838 ± 0.009 |
+| A5 n = 10 | 0.060, 0.063, 0.058 | 0.060 ± 0.003 | 0.930, 0.926, 0.932 | 0.929 ± 0.003 |
+
+Newest-first: 0.346 / 0.323. Seed minus newest-first: random +0.099\*, +0.084\*, +0.112\*; hard +0.224\*, +0.194\*, +0.213\*.
+
+### EB-NeRD (news)
+
+| Ablation | Random: 42, 43, 44 | Random: mean ± SD | Hard: 42, 43, 44 | Hard: mean ± SD |
+|---|---|---|---|---|
+| Baseline | 0.394, 0.379, 0.420 | 0.397 ± 0.021 | 0.487, 0.436, 0.448 | 0.457 ± 0.027 |
+| A2 Swap | 0.001, 0.000, 0.001 | 0.001 ± 0.001 | 0.000, 0.001, 0.001 | 0.001 ± 0.001 |
+| A3 Hide | 0.014, 0.004, 0.036 | 0.018 ± 0.017 | 0.013, 0.004, 0.035 | 0.017 ± 0.016 |
+| A4 Shuffle | 0.035, 0.031, 0.036 | 0.034 ± 0.003 | 0.031, 0.036, 0.040 | 0.036 ± 0.004 |
+| A6 All-new | 0.097, 0.078, 0.123 | 0.099 ± 0.022 | 0.117, 0.078, 0.126 | 0.107 ± 0.025 |
+
+| Ablation | Recall@1: 42, 43, 44 | Recall@1: mean ± SD | Trap@1: 42, 43, 44 | Trap@1: mean ± SD |
+|---|---|---|---|---|
+| A1-ctrl | 0.241, 0.199, 0.300 | 0.247 ± 0.051 | 0.202, 0.154, 0.187 | 0.181 ± 0.025 |
+| A1 Traps | 0.106, 0.101, 0.078 | 0.095 ± 0.015 | 0.828, 0.786, 0.865 | 0.826 ± 0.040 |
+| A5 n = 1 | 0.104, 0.096, 0.073 | 0.091 ± 0.016 | 0.846, 0.823, 0.874 | 0.848 ± 0.026 |
+| A5 n = 2 | 0.107, 0.101, 0.074 | 0.094 ± 0.018 | 0.850, 0.834, 0.877 | 0.854 ± 0.022 |
+| A5 n = 5 | 0.113, 0.096, 0.073 | 0.094 ± 0.020 | 0.858, 0.863, 0.885 | 0.869 ± 0.014 |
+| A5 n = 10 | 0.110, 0.091, 0.071 | 0.091 ± 0.020 | 0.888, 0.903, 0.924 | 0.905 ± 0.018 |
+
+Newest-first: 0.560 / 0.515. Seed minus newest-first: random −0.166\*, −0.181\*, −0.140\*; hard −0.028 (n.s.), −0.079\*, −0.068\*.
+
+**Summary.** The shortcut findings do not depend on the training seed.
+- **Every drop replicates:** on every seed and both datasets, A2, A3, A4 and A6 are significantly below the Baseline, and A1 and all A5 rows are significantly below A1-ctrl (McNemar p < 0.05).
+- **Amazon is stable:** Baseline SD is about 0.015, A1 Trap@1 is 0.551–0.567, and every seed beats newest-first significantly on both negatives.
+- **EB-NeRD varies more:** A1-ctrl Recall@1 ranges from 0.199 to 0.300, and the cost of traps from −0.098\* to −0.222\*. Report these as a mean and spread, not from one seed.
+- **One seed 42 reading does not hold:** on EB-NeRD hard negatives seed 42 ties with newest-first, but seeds 43 and 44 are significantly below it. Across seeds the model does not beat newest-first on EB-NeRD on either negative.
+- **The fix and the control lie outside seed variation on Amazon:** their A1 Trap@1 (0.278 and 0.501) and Baseline (0.296 / 0.334 and 0.299 / 0.345) are all below the lowest date-trained seed (0.551; 0.430 / 0.516). The fix and control themselves are still one seed each.
+- **EB-NeRD seed 44:** its training logged one non-finite grad norm at step 200 and one validation-loss spike at step 700, and ended at a validation loss matching the other seeds (0.199; seed 42 0.200, seed 43 0.198). It has the highest A1-ctrl Recall@1 and the highest Trap@1 on A1 and A5 of the three. Whether that comes from those events or ordinary seed variation is not established; every direction above is the same without it.
+- **Scope:** Llama-2-7B date-trained only. Three seeds give a rough measure of spread, and the data sampling was not varied.

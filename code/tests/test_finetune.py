@@ -9,6 +9,8 @@ from coldrank.adversarial.date_variants import make_a3_hide
 from coldrank.common import load_config
 from coldrank.finetune.impressions import IMP_NEG, attach_negatives, date_cue, imp_cfg
 from coldrank.finetune.impressions import build_examples as build_imp_examples
+from coldrank.finetune import merge as merge_mod
+from coldrank.finetune.oldmix import check_old_pool, k15_old_pools, mix_cutoff, old_training_instances
 from coldrank.finetune.sft_data import hide_dates, is_holdout, pointwise_prompt, select_candidates, sft_dir, sft_paths
 from coldrank.finetune.trainpools import check_cutoffs, k15_pools, neg_setting, training_instances
 from coldrank.llm.chat import format_chat
@@ -330,3 +332,89 @@ def test_nodates_finetune_config_consistent(tmp_path):
     assert not set(sft_paths(tmp_path, "llama2_7b_fp16", "nodates")) & set(sft_paths(tmp_path, "llama2_7b_fp16"))
     world = {"dataset": "x", "cutoff_T": "2023-05-25", "window_days": 1}
     assert sft_dir(world, "nodates") == sft_dir(world)
+
+
+def _old_pools(n=6):
+    """Old-target K = 15 pools: as _world50, with a warm item outside the top-k as the target."""
+    items, emb, inst, topk = _world50(n)
+    for r in inst:
+        r["instance_id"] = r["instance_id"].replace("train_", "trainold_")
+        r["target_item"], r["window_items"], r["kind"] = "w58", ["w58"], "old_target"
+        topk[r["instance_id"]] = [f"w{k:02d}" for k in range(55)]
+    cfg = {"pool": {"n_warm": 40, "n_cold": 10, "neg_settings": ["random", "hard"], "dup_threshold": 0.99,
+                    "profile_len": 20}}
+    return k15_old_pools(build_pools(inst, topk, items, emb, {}, T, cfg)[0])
+
+
+def test_old_pools_have_the_shape_of_the_cold_pools():
+    pools = _old_pools()
+    assert len(pools) == 6 and {p["condition"] for p in pools} == {"k15_train_old"}
+    for p in pools:
+        check_old_pool(p)
+        gold = next(c for c in p["candidates"] if c["is_gold"])
+        assert gold["item_id"] == "w58" and not gold["new_dated"] and not gold["is_cold"]
+        roles = [c["role"] for c in select_candidates(p, 3)]
+        assert sorted(roles) == sorted([GOLD, COLD_NEG, COLD_NEG, WARM, WARM, WARM])
+        assert all(c["new_dated"] for c in p["candidates"] if c["role"] == COLD_NEG)
+        assert not any(c["new_dated"] for c in p["candidates"] if c["role"] == WARM)
+
+
+def test_old_instances_prefer_cold_users_and_exclude_eval_users():
+    old = [{"user_id": f"u{k}", "target_item": "w1"} for k in range(20)]
+    cfg = {"dataset": "x", "seed": 1}
+    cold_users = {"u0", "u1", "u2", "u3", "u19"}
+    inst, st = old_training_instances(old, cold_users, {"u19", "u5"}, cfg, "2020-01-01")
+    assert {r["user_id"] for r in inst[:4]} == {"u0", "u1", "u2", "u3"}
+    assert not {r["user_id"] for r in inst} & {"u19", "u5"}
+    assert st["n_same_users"] == 4 and len(inst) == 4 + 2 * 2  # margin: 2 * floor(5 / 2)
+    assert len({r["instance_id"] for r in inst}) == len(inst)
+
+
+def test_mix_keeps_the_count_and_one_pool_per_user():
+    cold = [{"pool_id": f"c{k}", "user_id": f"u{k}"} for k in range(11)]
+    old = [{"pool_id": f"o{k}", "user_id": f"u{k}"} for k in range(3)] + [{"pool_id": f"o{k}", "user_id": f"x{k}"} for k in range(9)]
+    mixed, st = mix_cutoff(cold, old, "2020-01-01")
+    users = [p["user_id"] for p in mixed]
+    assert len(mixed) == 11 and len(set(users)) == 11
+    assert st == {"n_cold_kept": 6, "n_old": 5, "n_old_same_user": 3}
+    assert [p["pool_id"] for p in mixed[-5:]] == ["o0", "o1", "o2", "o0", "o1"]  # preference order
+    assert mix_cutoff(cold, old, "2020-01-01")[0] == mixed
+    with pytest.raises(ValueError):
+        mix_cutoff(cold, old[:4], "2020-01-01")
+
+
+def test_oldmix_and_seed_configs_consistent(tmp_path):
+    base, models = load_config("finetune"), load_config("models")
+    mix = load_config("finetune_oldmix")
+    assert mix["sft_variant"] == "oldmix" and "run_tag" not in mix
+    same = lambda c: {**{k: v for k, v in c.items() if k not in ("sft_variant", "run_tag", "train")},
+                      "train": {k: v for k, v in c["train"].items() if k not in ("seed", "save_total_limit")}}
+    base_view = same(base)
+    assert same(mix) == base_view and mix["train"]["seed"] == base["train"]["seed"]
+    world = {"dataset": "x", "cutoff_T": "2023-05-25", "window_days": 1}
+    assert sft_dir(world, "oldmix") == sft_dir(world)
+    assert not set(sft_paths(tmp_path, "llama2_7b_fp16", "oldmix")) & set(sft_paths(tmp_path, "llama2_7b_fp16"))
+    main = models["llama2_7b_ft_amazon_vg"]
+    assert {k: v for k, v in models["llama2_7b_ftoldmix_amazon_vg"].items() if k != "adapter"} == {k: v for k, v in main.items() if k != "adapter"}
+    for sd in (43, 44):
+        f = load_config(f"finetune_s{sd}")
+        assert same(f) == base_view and f["train"]["seed"] == sd and f["run_tag"] == f"s{sd}" and "sft_variant" not in f
+        for ds in ("amazon_vg", "ebnerd"):
+            m = models[f"llama2_7b_ft_{ds}_s{sd}"]
+            assert m["adapter"] == f"outputs/finetune/{ds}/llama2_7b_s{sd}/adapter"
+            assert {k: v for k, v in m.items() if k != "adapter"} == {k: v for k, v in main.items() if k != "adapter"}
+
+
+def test_merged_root_skips_a_full_disk(tmp_path, monkeypatch):
+    ssd, hdd = tmp_path / "ssd", tmp_path / "hdd"
+    ssd.mkdir(), hdd.mkdir()
+    free = {str(ssd): 138 * 1024**2, str(hdd): 975 * 1024**3}
+    monkeypatch.delenv("COLDRANK_MERGED_DIR", raising=False)
+    monkeypatch.setenv("USER", "me")
+    monkeypatch.setattr(merge_mod, "LOCAL_DISKS", (str(ssd), str(hdd)))
+    monkeypatch.setattr(merge_mod.shutil, "disk_usage", lambda d: type("U", (), {"free": free[str(d)]}))
+    assert merge_mod.merged_root() == hdd / "me" / "coldrank_merged"
+    free[str(ssd)] = 500 * 1024**3
+    assert merge_mod.merged_root() == ssd / "me" / "coldrank_merged"
+    free[str(ssd)] = free[str(hdd)] = 0
+    assert merge_mod.merged_root() == merge_mod.PROJECT_DIR / "merged"

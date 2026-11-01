@@ -12,9 +12,13 @@ Outputs (in <split dir>/finetune/): sft_train.jsonl, sft_val.jsonl, sft_stats.js
 `--variant nodates` (dates-hidden control, design.md): the same pools, candidates and users, with
 every displayed date removed as in A3; files sft_{train,val}_<model>_nodates.jsonl.
 
+`--variant oldmix` (fix experiment, coldrank.finetune.oldmix): half of each cutoff's pools have an old
+correct item; files sft_{train,val}_<model>_oldmix.jsonl.
+
 Usage:
     python -m coldrank.finetune.sft_data --config amazon_vg --model llama2_7b_fp16
     python -m coldrank.finetune.sft_data --config amazon_vg --model llama2_7b_fp16 --variant nodates
+    python -m coldrank.finetune.sft_data --config amazon_vg --model llama2_7b_fp16 --variant oldmix
 """
 
 from __future__ import annotations
@@ -45,8 +49,8 @@ def sft_paths(fd: Path, model: str, variant: str = "") -> tuple[Path, Path, Path
 
 
 def sft_dir(cfg: dict, variant: str = "") -> Path:
-    """Directory of the SFT files: <split>/finetune/ (also "nodates"), or <split>/finetune/impressions/ for "imp"."""
-    if variant not in ("", "imp", "nodates"):
+    """Directory of the SFT files: <split>/finetune/ (also "nodates", "oldmix"), or <split>/finetune/impressions/ for "imp"."""
+    if variant not in ("", "imp", "nodates", "oldmix"):
         raise ValueError(f"unknown sft_variant {variant!r}")
     return ft_dir(cfg) / "impressions" if variant == "imp" else ft_dir(cfg)
 
@@ -98,7 +102,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="amazon_vg")
     ap.add_argument("--model", default="llama2_7b_fp16", help="models.yaml key: tokenizer and chat format")
-    ap.add_argument("--variant", default="", choices=["", "nodates"], help="nodates: dates-hidden control")
+    ap.add_argument("--variant", default="", choices=["", "nodates", "oldmix"],
+                    help="nodates: dates-hidden control; oldmix: half the pools have an old correct item")
     args = ap.parse_args()
     cfg = load_config(args.config)
     mcfg = load_config("models")[args.model]
@@ -108,7 +113,7 @@ def main() -> None:
     count = lambda s: len(tok(s)["input_ids"])  # noqa: E731  (with BOS, as vLLM counts)
 
     fd = ft_dir(cfg)
-    pools = list(read_jsonl(fd / "train_pools_k15.jsonl"))
+    pools = list(read_jsonl(fd / ("train_pools_oldmix_k15.jsonl" if args.variant == "oldmix" else "train_pools_k15.jsonl")))
     if args.variant == "nodates":
         pools = [hide_dates(p) for p in pools]
     rows = build_examples(pools, cfg, mcfg["family"], count, mcfg["max_model_len"])
