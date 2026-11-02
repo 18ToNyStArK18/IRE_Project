@@ -43,3 +43,6 @@ code/scripts/write_manifest.py
 
 # Test caches
 .pytest_cache/
+
+# Internal reference document for writing the paper (kept locally, never committed)
+/progress/

@@ -13,8 +13,14 @@ same users where possible; the cold-target pools to keep are a seeded choice amo
 Outputs (in <split dir>/finetune/):
   cutoff_<T'>/old/pools_k15.jsonl, stats.json, sasrec_report.json, item_embeddings.npz
   train_pools_oldmix_k15.jsonl, train_pools_oldmix_stats.json (after --collect)
+  train_pools_oldonly_k15.jsonl, train_pools_oldonly_stats.json (after --collect --variant oldonly)
+
+--variant oldonly (Li-style control, design.md): Li et al. fine-tune with cold items removed. Per cutoff,
+as many old-target pools as there are cold-target pools (preference order, one per user), with the two
+new negatives removed: gold (old) + 12 warm, so no training example shows a new item.
 
 Usage:
+    python -m coldrank.finetune.oldmix --config amazon_vg --collect --variant oldonly   # Li-style data
     python -m coldrank.finetune.oldmix --config amazon_vg --cutoff 2019-09-01   # one cutoff (GPU)
     python -m coldrank.finetune.oldmix --config amazon_vg --collect             # merge the cutoffs
 """
@@ -33,6 +39,7 @@ from coldrank.data.split import build_instances, split_dir
 from coldrank.finetune.trainpools import check_cutoffs, cutoff_tag, eval_users, ft_dir, neg_setting, rank_and_pool
 
 POOLS_FILE = "train_pools_oldmix_k15.jsonl"
+OLDONLY_FILE = "train_pools_oldonly_k15.jsonl"
 
 
 def n_old_for(n_pools: int) -> int:
@@ -99,6 +106,32 @@ def mix_cutoff(cold: list[dict], old: list[dict], cutoff: str) -> tuple[list[dic
                            "n_old_same_user": len(users & {p["user_id"] for p in cold})}
 
 
+def strip_new(p: dict) -> dict:
+    """Li-style pool: the old-target pool without its new negatives (gold + 12 warm, all dated <= T')."""
+    q = {**p, "candidates": [c for c in p["candidates"] if c["role"] != COLD_NEG], "condition": "k15_train_oldonly"}
+    T = date_to_ts(q["cutoff_T"])
+    assert len(q["candidates"]) == N_WARM + 1 and all(c["t0"] <= T and not c["is_cold"] for c in q["candidates"]), q["pool_id"]
+    return q
+
+
+def oldonly_cutoff(cold: list[dict], old: list[dict], cutoff: str) -> tuple[list[dict], dict]:
+    """Li-style data: as many old-target pools as `cold` has (first in preference order, one per user),
+    with the new negatives removed, so no training example shows a new item."""
+    seen, chosen = set(), []
+    for p in old:
+        if p["user_id"] not in seen:
+            seen.add(p["user_id"])
+            chosen.append(strip_new(p))
+        if len(chosen) == len(cold):
+            break
+    if len(chosen) < len(cold):
+        raise ValueError(f"{cutoff}: {len(chosen)} old-target users, {len(cold)} needed")
+    gold_newest = sum(max(c["t0"] for c in p["candidates"]) == next(c["t0"] for c in p["candidates"] if c["is_gold"])
+                      for p in chosen)
+    return chosen, {"n_old": len(chosen), "n_old_same_user": len(seen & {p["user_id"] for p in cold}),
+                    "n_gold_newest": gold_newest}
+
+
 def build_cutoff(cfg: dict, cutoff: str, device: str) -> dict:
     sd = split_dir(cfg)
     cut_dir = ft_dir(cfg) / f"cutoff_{cutoff_tag(cutoff)}"
@@ -119,27 +152,28 @@ def build_cutoff(cfg: dict, cutoff: str, device: str) -> dict:
     return stats
 
 
-def collect(cfg: dict) -> dict:
-    """Mix every cutoff; check that no dev/test user or window leaked in."""
+def collect(cfg: dict, variant: str = "oldmix") -> dict:
+    """Mix every cutoff ("oldmix") or keep only old-target pools without new items ("oldonly");
+    check that no dev/test user or window leaked in."""
     sd, fd = split_dir(cfg), ft_dir(cfg)
     excluded, T = eval_users(sd), date_to_ts(str(cfg["cutoff_T"]))
+    step = {"oldmix": mix_cutoff, "oldonly": oldonly_cutoff}[variant]
     pools, per_cut = [], {}
     for c in check_cutoffs(cfg):
         cut = fd / f"cutoff_{cutoff_tag(c)}"
         if not (cut / "old" / "pools_k15.jsonl").exists():
             raise SystemExit(f"missing old-target pools for {c}: run --cutoff {c} first")
-        mixed, st = mix_cutoff(list(read_jsonl(cut / "pools_k15.jsonl")), list(read_jsonl(cut / "old" / "pools_k15.jsonl")), c)
+        mixed, st = step(list(read_jsonl(cut / "pools_k15.jsonl")), list(read_jsonl(cut / "old" / "pools_k15.jsonl")), c)
         per_cut[c] = st
         pools += mixed
     for p in pools:
         assert p["user_id"] not in excluded, p["pool_id"]
         assert p["target_ts"] < T and all(c["t0"] <= p["target_ts"] for c in p["candidates"]), p["pool_id"]
     assert len({p["pool_id"] for p in pools}) == len(pools)
-    n = write_jsonl(fd / POOLS_FILE, pools)
+    n = write_jsonl(fd / (POOLS_FILE if variant == "oldmix" else OLDONLY_FILE), pools)
     stats = {"n_pools": n, "per_cutoff": per_cut, "n_users": len({p["user_id"] for p in pools}),
-             "n_old": sum(s["n_old"] for s in per_cut.values()),
-             "n_old_same_user": sum(s["n_old_same_user"] for s in per_cut.values())}
-    (fd / "train_pools_oldmix_stats.json").write_text(json.dumps(stats, indent=2))
+             **{k: sum(s[k] for s in per_cut.values()) for k in next(iter(per_cut.values()))}}
+    (fd / f"train_pools_{variant}_stats.json").write_text(json.dumps(stats, indent=2))
     print(json.dumps(stats, indent=2))
     return stats
 
@@ -149,6 +183,8 @@ def main() -> None:
     ap.add_argument("--config", default="amazon_vg")
     ap.add_argument("--cutoff", help="build one cutoff (one of finetune.cutoffs)")
     ap.add_argument("--collect", action="store_true", help="mix the per-cutoff pools")
+    ap.add_argument("--variant", default="oldmix", choices=["oldmix", "oldonly"],
+                    help="for --collect: oldmix = half old targets; oldonly = only old targets, no new items (Li-style)")
     ap.add_argument("--device", default=None)
     args = ap.parse_args()
     cfg = load_config(args.config)
@@ -160,7 +196,7 @@ def main() -> None:
 
         build_cutoff(cfg, args.cutoff, args.device or ("cuda" if torch.cuda.is_available() else "cpu"))
     if args.collect:
-        collect(cfg)
+        collect(cfg, args.variant)
     if not (args.cutoff or args.collect):
         raise SystemExit("give --cutoff or --collect")
 

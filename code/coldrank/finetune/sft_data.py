@@ -15,10 +15,15 @@ every displayed date removed as in A3; files sft_{train,val}_<model>_nodates.jso
 `--variant oldmix` (fix experiment, coldrank.finetune.oldmix): half of each cutoff's pools have an old
 correct item; files sft_{train,val}_<model>_oldmix.jsonl.
 
+`--variant oldonly` (Li-style control): every pool has an old correct item and no new item (gold + 12 warm);
+the two cold-negative slots go to warm candidates, so each pool still gives gold + 5 wrong examples;
+files sft_{train,val}_<model>_oldonly.jsonl.
+
 Usage:
     python -m coldrank.finetune.sft_data --config amazon_vg --model llama2_7b_fp16
     python -m coldrank.finetune.sft_data --config amazon_vg --model llama2_7b_fp16 --variant nodates
     python -m coldrank.finetune.sft_data --config amazon_vg --model llama2_7b_fp16 --variant oldmix
+    python -m coldrank.finetune.sft_data --config amazon_vg --model llama2_7b_fp16 --variant oldonly
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from pathlib import Path
 import numpy as np
 
 from coldrank.adversarial.common import COLD_NEG, GOLD, WARM
+from coldrank.adversarial.resize import N_COLD_NEG
 from coldrank.common import load_config, read_jsonl, rng_for, write_jsonl
 from coldrank.finetune.trainpools import ft_dir
 from coldrank.llm.chat import format_chat
@@ -49,8 +55,8 @@ def sft_paths(fd: Path, model: str, variant: str = "") -> tuple[Path, Path, Path
 
 
 def sft_dir(cfg: dict, variant: str = "") -> Path:
-    """Directory of the SFT files: <split>/finetune/ (also "nodates", "oldmix"), or <split>/finetune/impressions/ for "imp"."""
-    if variant not in ("", "imp", "nodates", "oldmix"):
+    """Directory of the SFT files: <split>/finetune/ (also "nodates", "oldmix", "oldonly"), or <split>/finetune/impressions/ for "imp"."""
+    if variant not in ("", "imp", "nodates", "oldmix", "oldonly"):
         raise ValueError(f"unknown sft_variant {variant!r}")
     return ft_dir(cfg) / "impressions" if variant == "imp" else ft_dir(cfg)
 
@@ -86,11 +92,11 @@ def pointwise_prompt(pool: dict, cand: dict, cfg: dict, family: str, count_token
         h -= 1
 
 
-def build_examples(pools: list[dict], cfg: dict, family: str, count_tokens, max_len: int) -> list[dict]:
-    fc = cfg["finetune"]
+def build_examples(pools: list[dict], cfg: dict, family: str, count_tokens, max_len: int, n_warm: int | None = None) -> list[dict]:
+    n_warm = int(cfg["finetune"]["warm_per_pool"]) if n_warm is None else n_warm
     rows = []
     for p in pools:
-        for c in select_candidates(p, int(fc["warm_per_pool"])):
+        for c in select_candidates(p, n_warm):
             prompt, trimmed = pointwise_prompt(p, c, cfg, family, count_tokens, max_len)
             rows.append({"pool_id": p["pool_id"], "user_id": p["user_id"], "item_id": c["item_id"],
                          "role": c["role"], "label": "Yes" if c["is_gold"] else "No",
@@ -102,8 +108,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="amazon_vg")
     ap.add_argument("--model", default="llama2_7b_fp16", help="models.yaml key: tokenizer and chat format")
-    ap.add_argument("--variant", default="", choices=["", "nodates", "oldmix"],
-                    help="nodates: dates-hidden control; oldmix: half the pools have an old correct item")
+    ap.add_argument("--variant", default="", choices=["", "nodates", "oldmix", "oldonly"],
+                    help="nodates: dates-hidden control; oldmix: half the pools have an old correct item; "
+                         "oldonly: every correct item old, no new items (Li-style)")
     args = ap.parse_args()
     cfg = load_config(args.config)
     mcfg = load_config("models")[args.model]
@@ -113,10 +120,15 @@ def main() -> None:
     count = lambda s: len(tok(s)["input_ids"])  # noqa: E731  (with BOS, as vLLM counts)
 
     fd = ft_dir(cfg)
-    pools = list(read_jsonl(fd / ("train_pools_oldmix_k15.jsonl" if args.variant == "oldmix" else "train_pools_k15.jsonl")))
+    pool_file = {"oldmix": "train_pools_oldmix_k15.jsonl", "oldonly": "train_pools_oldonly_k15.jsonl"}.get(args.variant, "train_pools_k15.jsonl")
+    pools = list(read_jsonl(fd / pool_file))
     if args.variant == "nodates":
         pools = [hide_dates(p) for p in pools]
-    rows = build_examples(pools, cfg, mcfg["family"], count, mcfg["max_model_len"])
+    n_warm = int(cfg["finetune"]["warm_per_pool"])
+    if args.variant == "oldonly":
+        assert not any(c["role"] == COLD_NEG or c["is_cold"] for p in pools for c in p["candidates"]), "oldonly pools contain a new item"
+        n_warm += N_COLD_NEG  # same examples per pool as the other variants
+    rows = build_examples(pools, cfg, mcfg["family"], count, mcfg["max_model_len"], n_warm)
     frac = float(cfg["finetune"]["holdout_frac"])
     val = [r for r in rows if is_holdout(r["user_id"], frac)]
     train = [r for r in rows if not is_holdout(r["user_id"], frac)]

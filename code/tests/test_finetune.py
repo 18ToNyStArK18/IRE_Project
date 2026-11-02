@@ -10,7 +10,7 @@ from coldrank.common import load_config
 from coldrank.finetune.impressions import IMP_NEG, attach_negatives, date_cue, imp_cfg
 from coldrank.finetune.impressions import build_examples as build_imp_examples
 from coldrank.finetune import merge as merge_mod
-from coldrank.finetune.oldmix import check_old_pool, k15_old_pools, mix_cutoff, old_training_instances
+from coldrank.finetune.oldmix import check_old_pool, k15_old_pools, mix_cutoff, old_training_instances, oldonly_cutoff, strip_new
 from coldrank.finetune.sft_data import hide_dates, is_holdout, pointwise_prompt, select_candidates, sft_dir, sft_paths
 from coldrank.finetune.trainpools import check_cutoffs, k15_pools, neg_setting, training_instances
 from coldrank.llm.chat import format_chat
@@ -403,6 +403,46 @@ def test_oldmix_and_seed_configs_consistent(tmp_path):
             m = models[f"llama2_7b_ft_{ds}_s{sd}"]
             assert m["adapter"] == f"outputs/finetune/{ds}/llama2_7b_s{sd}/adapter"
             assert {k: v for k, v in m.items() if k != "adapter"} == {k: v for k, v in main.items() if k != "adapter"}
+
+
+def test_oldonly_pools_have_no_new_item_and_six_examples():
+    pools = _old_pools()
+    cold = [{"pool_id": f"c{k}", "user_id": p["user_id"]} for k, p in enumerate(pools[:4])]
+    chosen, st = oldonly_cutoff(cold, pools, "2020-01-01")
+    assert len(chosen) == 4 and len({p["user_id"] for p in chosen}) == 4
+    assert st["n_old"] == 4 and st["n_old_same_user"] == 4 and 0 <= st["n_gold_newest"] <= 4
+    for p in chosen:
+        assert p["condition"] == "k15_train_oldonly" and len(p["candidates"]) == 13
+        assert not any(c["role"] == COLD_NEG or c["is_cold"] or c["new_dated"] for c in p["candidates"])
+        roles = [c["role"] for c in select_candidates(p, 3 + 2)]
+        assert sorted(roles) == sorted([GOLD] + [WARM] * 5)
+    assert strip_new(pools[0])["candidates"] == [c for c in pools[0]["candidates"] if c["role"] != COLD_NEG]
+    with pytest.raises(ValueError):
+        oldonly_cutoff(cold + [{"pool_id": "c9", "user_id": "zz"}] * 10, pools, "2020-01-01")
+
+
+def test_oldonly_takes_one_pool_per_user_in_preference_order():
+    pools = _old_pools()
+    dup = [pools[0], {**pools[0], "pool_id": "dup"}] + pools[1:]
+    chosen, _ = oldonly_cutoff([{"user_id": "a"}, {"user_id": "b"}, {"user_id": "c"}], dup, "2020-01-01")
+    assert [p["pool_id"] for p in chosen] == [pools[k]["pool_id"] for k in range(3)]
+
+
+def test_oldonly_config_and_model_consistent(tmp_path):
+    base, models = load_config("finetune"), load_config("models")
+    f = load_config("finetune_oldonly")
+    assert f["sft_variant"] == "oldonly" and "run_tag" not in f
+    same = lambda c: {**{k: v for k, v in c.items() if k not in ("sft_variant", "run_tag", "train")},
+                      "train": {k: v for k, v in c["train"].items() if k not in ("save_total_limit",)}}
+    assert same(f) == same(base)
+    world = {"dataset": "x", "cutoff_T": "2023-05-25", "window_days": 1}
+    assert sft_dir(world, "oldonly") == sft_dir(world)
+    assert not set(sft_paths(tmp_path, "llama2_7b_fp16", "oldonly")) & (set(sft_paths(tmp_path, "llama2_7b_fp16"))
+                                                                         | set(sft_paths(tmp_path, "llama2_7b_fp16", "oldmix")))
+    main = models["llama2_7b_ft_amazon_vg"]
+    m = models["llama2_7b_ftoldonly_amazon_vg"]
+    assert m["adapter"] == "outputs/finetune/amazon_vg/llama2_7b_oldonly/adapter"
+    assert {k: v for k, v in m.items() if k != "adapter"} == {k: v for k, v in main.items() if k != "adapter"}
 
 
 def test_merged_root_skips_a_full_disk(tmp_path, monkeypatch):

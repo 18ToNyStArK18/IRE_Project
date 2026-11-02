@@ -166,6 +166,18 @@ llama2_7b_ftoldmix_amazon_vg:
   vllm:
     tensor_parallel_size: 2
 
+# Li-style control: Llama-2 fine-tuned on Amazon VG with only old correct items and no new item in training
+# (finetune_oldonly.yaml; design.md).
+llama2_7b_ftoldonly_amazon_vg:
+  base: llama2_7b_fp16
+  adapter: outputs/finetune/amazon_vg/llama2_7b_oldonly/adapter
+  family: llama2
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 2
+
 # The date-trained Llama-2 models with other training seeds (finetune_s43.yaml, finetune_s44.yaml; design.md).
 llama2_7b_ft_amazon_vg_s43:
   base: llama2_7b_fp16
