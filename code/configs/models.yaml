@@ -178,6 +178,27 @@ llama2_7b_ftoldonly_amazon_vg:
   vllm:
     tensor_parallel_size: 2
 
+# The fix model (half old correct items, finetune_oldmix_s43/s44.yaml) with other training seeds (design.md).
+llama2_7b_ftoldmix_amazon_vg_s43:
+  base: llama2_7b_fp16
+  adapter: outputs/finetune/amazon_vg/llama2_7b_oldmix_s43/adapter
+  family: llama2
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 2
+
+llama2_7b_ftoldmix_amazon_vg_s44:
+  base: llama2_7b_fp16
+  adapter: outputs/finetune/amazon_vg/llama2_7b_oldmix_s44/adapter
+  family: llama2
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 2
+
 # The date-trained Llama-2 models with other training seeds (finetune_s43.yaml, finetune_s44.yaml; design.md).
 llama2_7b_ft_amazon_vg_s43:
   base: llama2_7b_fp16

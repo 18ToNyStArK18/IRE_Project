@@ -490,3 +490,67 @@ Newest-first: 0.560 / 0.515. Seed minus newest-first: random −0.166\*, −0.18
 - **The fix and the control lie outside seed variation on Amazon:** their A1 Trap@1 (0.278 and 0.501) and Baseline (0.296 / 0.334 and 0.299 / 0.345) are all below the lowest date-trained seed (0.551; 0.430 / 0.516). The fix and control themselves are still one seed each.
 - **EB-NeRD seed 44:** its training logged one non-finite grad norm at step 200 and one validation-loss spike at step 700, and ended at a validation loss matching the other seeds (0.199; seed 42 0.200, seed 43 0.198). It has the highest A1-ctrl Recall@1 and the highest Trap@1 on A1 and A5 of the three. Whether that comes from those events or ordinary seed variation is not established; every direction above is the same without it.
 - **Scope:** Llama-2-7B date-trained only. Three seeds give a rough measure of spread, and the data sampling was not varied.
+
+## Llama-2-7B Li-style control (old correct items only, no new items in training), Amazon Video Games — dev set (2026-11-03)
+
+**Model.** Llama-2-7B-Chat fine-tuned the way Li et al. build their SFT data: **cold items removed from training**. Every training pool has an old correct item and only old wrong items (gold + 12 warm; the two new negatives of the fix's old-target pools are dropped and replaced by two more warm candidates in the SFT step), so **no training example shows a new item**. Same pool count (4,183), same settings and seed as the date-trained model, dates shown. 23,820 train / 1,278 validation examples. Training: job 53780 hit the ADA home quota at the final save (step 740/744); resumed from checkpoint-700 as job 54245 (final validation loss 0.266, no non-finite steps). Evaluation job 54246 (18 min, pointwise check passed, max difference 0.016). **In these training pools the old correct item is the newest candidate in 50.7% of pools** (chance 7.7%): users buy recently released items even among old ones.
+
+**Evaluation.** As in the fix dev section: 150 users per cold-target cell, 144 per old-target cell, K = 15, Recall@1 as random / hard negatives, chance 0.067. Every pool has a complete ranking. **Change** = the Li-style model's paired change against the reference row (Baseline for A2–A6, A1-ctrl for A1/A5); **vs date-trained** = Li-style minus date-trained on the same pools; \* = McNemar p < 0.05. Trap@1 chance: A1 0.20; A5 n = 1, 2, 5, 10: 0.267, 0.333, 0.533, 0.867.
+
+| Ablation | What it does | Recall@1, date-trained | Recall@1, fix | Recall@1, Li-style | Change (Li-style) | vs date-trained | Trap@1, date-trained → Li-style |
+|---|---|---|---|---|---|---|---|
+| Baseline | correct item is new; dates shown | 0.373 / 0.460 | 0.267 / 0.260 | 0.140 / 0.367 | — | −0.233\* / −0.093 | — |
+| A2 Swap | correct item's date swapped with an old wrong one's | 0.007 / 0.007 | 0.080 / 0.080 | 0.000 / 0.027 | −0.140\* / −0.340\* | −0.007 / +0.020 | — |
+| A3 Hide | all dates removed | 0.093 / 0.087 | 0.127 / 0.147 | 0.173 / 0.313 | +0.033 / −0.053 | +0.080 / +0.227\* | — |
+| A4 Shuffle | dates randomly reassigned among candidates | 0.093 / 0.060 | 0.100 / 0.093 | 0.153 / 0.127 | +0.013 / −0.240\* | +0.060 / +0.067 | — |
+| A6 All-new | all 15 candidates are new | 0.240 / 0.280 | 0.207 / 0.313 | 0.007 / 0.133 | −0.133\* / −0.233\* | −0.233\* / −0.147\* | — |
+| A1-ctrl (old-target reference) | correct item is old; nothing new-looking | 0.389 | 0.326 | 0.556 | — | +0.167\* | 0.104 → 0.069 |
+| A1 Traps | correct item is old, plus 3 new irrelevant items | 0.139 | 0.236 | 0.062 | −0.493\* | −0.076\* | 0.528 → **0.931\*** |
+| A5 Flood, n = 1 | A1 + 1 old wrong item relabelled new | 0.125 | 0.236 | 0.056 | −0.500\* | −0.069 | 0.632 → 0.938\* |
+| A5 Flood, n = 2 | A1 + 2 relabelled | 0.083 | 0.188 | 0.056 | −0.500\* | −0.028 | 0.688 → 0.938\* |
+| A5 Flood, n = 5 | A1 + 5 relabelled | 0.062 | 0.160 | 0.056 | −0.500\* | −0.007 | 0.826 → 0.944\* |
+| A5 Flood, n = 10 | A1 + 10 relabelled | 0.042 | 0.146 | 0.049 | −0.507\* | +0.007 | 0.951 → 0.951 |
+
+Newest-first on these pools: 0.347 / 0.307 (Baseline), 0.562 (A1-ctrl). Li-style minus newest-first on Baseline: −0.207\* / +0.060 (n.s.).
+
+**Summary.** Removing cold items from training does not remove the date shortcut; it makes the trap failure worse. New-looking irrelevant items take 93% of top spots on A1 (date-trained 53%, fix 27%, chance 20%), and swapping the correct item's date takes it to about 0. With only new candidates (A6) it is at or below chance. Its Baseline is low (0.140 / 0.367) and below newest-first on random negatives. Test below.
+
+## Llama-2-7B Li-style control (old correct items only, no new items in training), Amazon Video Games — test set (2026-11-03)
+
+**Model.** The Li-style model from the dev section above (job 54245). Evaluation job 54247 (1 h 18 min, pointwise check passed, max difference 0.016). **Date-trained** = the model from the Amazon test section (job 40143, evaluation 41008); **fix** = the half-old model (job 49600, evaluation 49882).
+
+**Evaluation.** Amazon VG test, the same pools as the date-trained and fix test sections: 800 users per cold-target cell (A6 799), 967 per old-target cell. Columns and chance levels as in the dev section above.
+
+| Ablation | What it does | Recall@1, date-trained | Recall@1, fix | Recall@1, Li-style | Change (Li-style) | vs date-trained | Trap@1, date-trained → Li-style |
+|---|---|---|---|---|---|---|---|
+| Baseline | correct item is new; dates shown | 0.445 / 0.546 | 0.296 / 0.334 | 0.152 / 0.297 | — | −0.292\* / −0.249\* | — |
+| A2 Swap | correct item's date swapped with an old wrong one's | 0.005 / 0.006 | 0.068 / 0.091 | 0.006 / 0.015 | −0.146\* / −0.282\* | +0.001 / +0.009 | — |
+| A3 Hide | all dates removed | 0.101 / 0.107 | 0.164 / 0.191 | 0.125 / 0.250 | −0.028 / −0.048\* | +0.024 / +0.142\* | — |
+| A4 Shuffle | dates randomly reassigned among candidates | 0.077 / 0.077 | 0.126 / 0.136 | 0.110 / 0.115 | −0.043\* / −0.182\* | +0.033\* / +0.037\* | — |
+| A6 All-new | all 15 candidates are new | 0.253 / 0.292 | 0.194 / 0.273 | 0.024 / 0.094 | −0.128\* / −0.204\* | −0.229\* / −0.198\* | — |
+| A1-ctrl (old-target reference) | correct item is old; nothing new-looking | 0.384 | 0.308 | 0.572 | — | +0.188\* | 0.127 → 0.100\* |
+| A1 Traps | correct item is old, plus 3 new irrelevant items | 0.152 | 0.236 | 0.039 | −0.533\* | −0.113\* | 0.562 → **0.945\*** |
+| A5 Flood, n = 1 | A1 + 1 old wrong item relabelled new | 0.103 | 0.226 | 0.040 | −0.532\* | −0.063\* | 0.675 → 0.950\* |
+| A5 Flood, n = 2 | A1 + 2 relabelled | 0.084 | 0.214 | 0.039 | −0.533\* | −0.044\* | 0.737 → 0.953\* |
+| A5 Flood, n = 5 | A1 + 5 relabelled | 0.067 | 0.180 | 0.038 | −0.534\* | −0.029\* | 0.845 → 0.960\* |
+| A5 Flood, n = 10 | A1 + 10 relabelled | 0.060 | 0.168 | 0.037 | −0.535\* | −0.023\* | 0.930 → 0.963\* |
+
+Newest-first on these pools: 0.346 / 0.323 (Baseline), 0.523 (A1-ctrl). Li-style minus newest-first on Baseline: −0.194\* / −0.025 (n.s.). Li-style minus fix on Baseline: −0.144\* / −0.036 (n.s.); on A1 Trap@1: +0.667\*.
+
+**How often the top-ranked item is simply the newest candidate** (test; for reference, how often the correct item is the newest):
+
+| Pools | Zero-shot | Date-trained | Fix | Li-style | Correct item is newest |
+|---|---|---|---|---|---|
+| Baseline, random / hard | 0.071 / 0.087 | 0.224 / 0.239 | 0.210 / 0.176 | **0.399 / 0.450** | 0.349 / 0.334 |
+| A1-ctrl (old target, all old) | 0.104 | 0.586 | 0.456 | 0.563 | 0.523 |
+| A1 Traps | 0.067 | 0.172 | 0.122 | 0.418 | 0.000 |
+| A6 All-new, random | 0.068 | 0.038 | 0.118 | 0.131 | 0.076 |
+
+**Summary.** Test confirms dev with more power. Training the way Li et al. do, with no new item anywhere in training, does **not** remove the date shortcut. It changes its form.
+- **What it learned is "the newest candidate wins".** Its training pools reward that rule (the old correct item is the newest candidate in 50.7% of pools, chance 7.7%), and it follows it more than any other model: its top pick is the newest candidate in 40–45% of Baseline pools, against 22–24% for the date-trained model and 7–9% zero-shot.
+- **Strongest trap failure of all models:** irrelevant new-looking items take **94.5%** of top spots on A1 (date-trained 56%, fix 28%, chance 20%), and 95–96% on every A5 row; Recall@1 under traps falls to 0.04.
+- **Dates decide:** swapping the correct item's date takes it to about 0 (0.006 / 0.015); shuffling costs −0.043\* / −0.182\*. With only new candidates (A6) it is at or below chance (0.024 / 0.094), so it has little to go on once dates stop separating the candidates.
+- **Old targets without traps:** A1-ctrl 0.572, the best of all models (+0.188\* vs date-trained), but newest-first already gets 0.523 there, because the old correct item is the newest candidate in 52% of these pools.
+- **On the cold-start benchmark it scores low:** 0.152 / 0.297, below newest-first on random negatives (−0.194\*) and level on hard (−0.025, n.s.). This matches Li et al.'s report that their fine-tuned models are weak on cold-start items when cold items are excluded from training. Here the standard benchmark is not over-crediting the model; it gives it a low score, but only the diagnostics show why.
+- **Reading for the paper:** the recency cue comes from user behaviour (people buy recent releases), not from how we built our pools. Every training set we tried carries it, including Li et al.'s setup, and every fine-tuned model follows it.
+- Caveats: single seed, Amazon only. The run resumed from step 700 after the quota failure, so it is not bit-identical to an uninterrupted run. Hard negatives are old by construction, which is why the Baseline score is higher on hard than random negatives for this model.

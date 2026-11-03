@@ -445,6 +445,17 @@ def test_oldonly_config_and_model_consistent(tmp_path):
     assert {k: v for k, v in m.items() if k != "adapter"} == {k: v for k, v in main.items() if k != "adapter"}
 
 
+def test_oldmix_seed_configs_consistent():
+    models, mix = load_config("models"), load_config("finetune_oldmix")
+    drop = lambda c: {**{k: v for k, v in c.items() if k != "run_tag"}, "train": {k: v for k, v in c["train"].items() if k != "seed"}}
+    for sd in (43, 44):
+        f = load_config(f"finetune_oldmix_s{sd}")
+        assert f["run_tag"] == f"s{sd}" and f["train"]["seed"] == sd and drop(f) == drop(mix)
+        m = models[f"llama2_7b_ftoldmix_amazon_vg_s{sd}"]
+        assert m["adapter"] == f"outputs/finetune/amazon_vg/llama2_7b_oldmix_s{sd}/adapter"
+        assert {k: v for k, v in m.items() if k != "adapter"} == {k: v for k, v in models["llama2_7b_ftoldmix_amazon_vg"].items() if k != "adapter"}
+
+
 def test_merged_root_skips_a_full_disk(tmp_path, monkeypatch):
     ssd, hdd = tmp_path / "ssd", tmp_path / "hdd"
     ssd.mkdir(), hdd.mkdir()
