@@ -114,21 +114,42 @@ def strip_new(p: dict) -> dict:
     return q
 
 
-def oldonly_cutoff(cold: list[dict], old: list[dict], cutoff: str) -> tuple[list[dict], dict]:
-    """Li-style data: as many old-target pools as `cold` has (first in preference order, one per user),
-    with the new negatives removed, so no training example shows a new item."""
+def n_old_users(old: list[dict]) -> int:
+    return len({p["user_id"] for p in old})
+
+
+def oldonly_quotas(need: list[int], avail: list[int]) -> list[int]:
+    """Per-cutoff Li-style pool counts. Each cutoff takes as many as the date-trained arm has there (`need`);
+    a cutoff with too few old-target users (`avail`) gives up its shortfall, which is taken from the other
+    cutoffs' surplus in cutoff order, so the total equals sum(need)."""
+    q = [min(n, a) for n, a in zip(need, avail)]
+    deficit = sum(need) - sum(q)
+    for i, a in enumerate(avail):
+        add = min(a - q[i], deficit)
+        q[i] += add
+        deficit -= add
+    if deficit:
+        raise ValueError(f"{sum(avail)} old-target users in all, {sum(need)} needed")
+    return q
+
+
+def oldonly_cutoff(cold: list[dict], old: list[dict], cutoff: str, n: int | None = None) -> tuple[list[dict], dict]:
+    """Li-style data: `n` old-target pools (default: as many as `cold` has; first in preference order,
+    one per user), with the new negatives removed, so no training example shows a new item."""
+    n = len(cold) if n is None else n
     seen, chosen = set(), []
     for p in old:
+        if len(chosen) == n:
+            break
         if p["user_id"] not in seen:
             seen.add(p["user_id"])
             chosen.append(strip_new(p))
-        if len(chosen) == len(cold):
-            break
-    if len(chosen) < len(cold):
-        raise ValueError(f"{cutoff}: {len(chosen)} old-target users, {len(cold)} needed")
+    if len(chosen) < n:
+        raise ValueError(f"{cutoff}: {len(chosen)} old-target users, {n} needed")
     gold_newest = sum(max(c["t0"] for c in p["candidates"]) == next(c["t0"] for c in p["candidates"] if c["is_gold"])
                       for p in chosen)
-    return chosen, {"n_old": len(chosen), "n_old_same_user": len(seen & {p["user_id"] for p in cold}),
+    return chosen, {"n_needed": len(cold), "n_old": len(chosen),
+                    "n_old_same_user": len({p["user_id"] for p in chosen} & {p["user_id"] for p in cold}),
                     "n_gold_newest": gold_newest}
 
 
@@ -157,13 +178,18 @@ def collect(cfg: dict, variant: str = "oldmix") -> dict:
     check that no dev/test user or window leaked in."""
     sd, fd = split_dir(cfg), ft_dir(cfg)
     excluded, T = eval_users(sd), date_to_ts(str(cfg["cutoff_T"]))
-    step = {"oldmix": mix_cutoff, "oldonly": oldonly_cutoff}[variant]
-    pools, per_cut = [], {}
+    data = {}
     for c in check_cutoffs(cfg):
         cut = fd / f"cutoff_{cutoff_tag(c)}"
         if not (cut / "old" / "pools_k15.jsonl").exists():
             raise SystemExit(f"missing old-target pools for {c}: run --cutoff {c} first")
-        mixed, st = step(list(read_jsonl(cut / "pools_k15.jsonl")), list(read_jsonl(cut / "old" / "pools_k15.jsonl")), c)
+        data[c] = (list(read_jsonl(cut / "pools_k15.jsonl")), list(read_jsonl(cut / "old" / "pools_k15.jsonl")))
+    if variant == "oldonly":
+        quota = dict(zip(data, oldonly_quotas([len(cold) for cold, _ in data.values()],
+                                              [n_old_users(old) for _, old in data.values()])))
+    pools, per_cut = [], {}
+    for c, (cold, old) in data.items():
+        mixed, st = mix_cutoff(cold, old, c) if variant == "oldmix" else oldonly_cutoff(cold, old, c, quota[c])
         per_cut[c] = st
         pools += mixed
     for p in pools:

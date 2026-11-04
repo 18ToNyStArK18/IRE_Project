@@ -10,7 +10,7 @@ from coldrank.common import load_config
 from coldrank.finetune.impressions import IMP_NEG, attach_negatives, date_cue, imp_cfg
 from coldrank.finetune.impressions import build_examples as build_imp_examples
 from coldrank.finetune import merge as merge_mod
-from coldrank.finetune.oldmix import check_old_pool, k15_old_pools, mix_cutoff, old_training_instances, oldonly_cutoff, strip_new
+from coldrank.finetune.oldmix import check_old_pool, k15_old_pools, mix_cutoff, old_training_instances, oldonly_cutoff, oldonly_quotas, strip_new
 from coldrank.finetune.sft_data import hide_dates, is_holdout, pointwise_prompt, select_candidates, sft_dir, sft_paths
 from coldrank.finetune.trainpools import check_cutoffs, k15_pools, neg_setting, training_instances
 from coldrank.llm.chat import format_chat
@@ -428,6 +428,22 @@ def test_oldonly_takes_one_pool_per_user_in_preference_order():
     assert [p["pool_id"] for p in chosen] == [pools[k]["pool_id"] for k in range(3)]
 
 
+def test_oldonly_quotas_top_up_shortfall_from_other_cutoffs():
+    assert oldonly_quotas([5, 5, 5], [9, 9, 9]) == [5, 5, 5]
+    assert oldonly_quotas([5, 5, 5], [6, 3, 9]) == [6, 3, 6]
+    assert sum(oldonly_quotas([746, 750], [643, 900])) == 1496
+    with pytest.raises(ValueError):
+        oldonly_quotas([5, 5], [4, 5])
+
+
+def test_oldonly_cutoff_takes_n_pools_when_given():
+    pools = _old_pools()
+    cold = [{"pool_id": "c0", "user_id": pools[0]["user_id"]}]
+    chosen, st = oldonly_cutoff(cold, pools, "2020-01-01", n=3)
+    assert [p["pool_id"] for p in chosen] == [p["pool_id"] for p in pools[:3]]
+    assert st["n_needed"] == 1 and st["n_old"] == 3 and st["n_old_same_user"] == 1
+
+
 def test_oldonly_config_and_model_consistent(tmp_path):
     base, models = load_config("finetune"), load_config("models")
     f = load_config("finetune_oldonly")
@@ -454,6 +470,32 @@ def test_oldmix_seed_configs_consistent():
         m = models[f"llama2_7b_ftoldmix_amazon_vg_s{sd}"]
         assert m["adapter"] == f"outputs/finetune/amazon_vg/llama2_7b_oldmix_s{sd}/adapter"
         assert {k: v for k, v in m.items() if k != "adapter"} == {k: v for k, v in models["llama2_7b_ftoldmix_amazon_vg"].items() if k != "adapter"}
+
+
+def test_oldonly_seed_configs_and_models_consistent():
+    models, li = load_config("models"), load_config("finetune_oldonly")
+    drop = lambda c: {**{k: v for k, v in c.items() if k != "run_tag"}, "train": {k: v for k, v in c["train"].items() if k != "seed"}}
+    ref = {k: v for k, v in models["llama2_7b_ftoldonly_amazon_vg"].items() if k != "adapter"}
+    assert models["llama2_7b_ftoldonly_ebnerd"]["adapter"] == "outputs/finetune/ebnerd/llama2_7b_oldonly/adapter"
+    for sd in (43, 44):
+        f = load_config(f"finetune_oldonly_s{sd}")
+        assert f["run_tag"] == f"s{sd}" and f["train"]["seed"] == sd and drop(f) == drop(li)
+        for ds in ("amazon_vg", "ebnerd"):
+            m = models[f"llama2_7b_ftoldonly_{ds}_s{sd}"]
+            assert m["adapter"] == f"outputs/finetune/{ds}/llama2_7b_oldonly_s{sd}/adapter"
+            assert {k: v for k, v in m.items() if k != "adapter"} == ref
+
+
+def test_qwen_oldonly_config_and_models_consistent():
+    models, ada, f = load_config("models"), load_config("finetune_qwen25_ada"), load_config("finetune_qwen25_ada_oldonly")
+    assert f["sft_variant"] == "oldonly" and "run_tag" not in f
+    assert {k: v for k, v in f.items() if k not in ("sft_variant", "train")} == {k: v for k, v in ada.items() if k != "train"}
+    assert {k: v for k, v in f["train"].items() if k != "save_total_limit"} == ada["train"]
+    ref = {k: v for k, v in models["qwen25_7b_ft_ebnerd"].items() if k != "adapter"}
+    for ds in ("amazon_vg", "ebnerd"):
+        m = models[f"qwen25_7b_ftoldonly_{ds}"]
+        assert m["adapter"] == f"outputs/finetune/{ds}/qwen25_7b_oldonly/adapter"
+        assert {k: v for k, v in m.items() if k != "adapter"} == ref
 
 
 def test_merged_root_skips_a_full_disk(tmp_path, monkeypatch):

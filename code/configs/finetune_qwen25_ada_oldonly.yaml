@@ -1,0 +1,37 @@
+# Qwen2.5-7B Li-style control on ADA (old correct items only, no new items in training; design.md):
+# exactly finetune_qwen25_ada.yaml (the uniform Qwen recipe of both pool-data Qwen runs) apart from the
+# data variant and keeping one checkpoint. One seed only (user decision 2026-11-03).
+sft_variant: oldonly                # output <base>_oldonly/
+# QLoRA fine-tuning of Qwen2.5-7B-Instruct on ADA (4 x 2080 Ti, DDP), the recipe of the Amazon Qwen
+# run (finetune_qwen25_1gpu.yaml, job 40320): same hyperparameters as finetune.yaml (Llama-2), fp16
+# compute and fp16 embeddings / lm_head (Qwen2.5's 152k vocabulary, else OOM). Only the batch split
+# differs: 4 GPUs with the dataset's train_overrides (EB-NeRD: 2 x 4 accumulation; effective batch 32).
+# Li et al. (Sec. 3.2.2) fix only "QLoRA, 4-bit, 1 epoch"; the rest are standard QLoRA values.
+base_model: qwen25_7b_fp16          # models.yaml key: full-precision weights, quantized to 4 bit at load
+
+quant:
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  compute_dtype: float16            # 2080 Ti (sm_75) has no bf16
+  keep_embeddings_fp16: true        # frozen embeddings / lm_head stay fp16 (Qwen2.5: 152k vocab, else OOM)
+
+lora:
+  r: 16
+  alpha: 32
+  dropout: 0.05
+  target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+train:
+  epochs: 1
+  lr: 2.0e-4
+  scheduler: cosine
+  warmup_ratio: 0.03
+  per_device_batch: 4
+  grad_accum: 2                     # effective batch 4 GPUs x 4 x 2 = 32
+  weight_decay: 0.0
+  max_grad_norm: 0.3
+  seed: 42
+  save_total_limit: 1                # ADA home has little space; resume needs only the last one
+  logging_steps: 10
+  eval_steps: 100
+  save_steps: 100

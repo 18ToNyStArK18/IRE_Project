@@ -6,159 +6,160 @@ IRE course project, IIIT Hyderabad: Vedavyas Bysani, Ayush Daga, Sanjith Ganapat
 
 LLM rerankers are reported to do well on **cold-start (new) items**. But cold-start test sets are built with a temporal split, so the correct item is always one of the *newest* candidates. A reranker that simply prefers new items scores well without reading any content.
 
-**When an LLM reranker succeeds on new items, how much of that is semantic relevance, and how much is a preference for recency?**
+**When an LLM reranker succeeds on new items, how much of that is relevance, and how much is a preference for recency?**
 
-We answer this in two steps:
-1. Reproduce the Netflix cold-start reranking protocol of Li et al. (WWW '26) on public data.
-2. Apply adversarial variants that separate recency from relevance: an old correct item with new "trap" items, and dates that are hidden, swapped, shuffled or flooded.
+We answer this in three steps:
+1. **Adapt** the Netflix cold-start reranking protocol of Li et al. (WWW '26) to public data: Amazon Video Games (a static catalogue, where recency should matter little) and EB-NeRD news (volatile, where recency is a real signal).
+2. **Fine-tune** 7B LLMs on that protocol, since no zero-shot model was competent enough to diagnose.
+3. **Probe** each model with adversarial variants that pull recency and relevance apart: dates swapped, hidden or shuffled; all-new pools; and an old correct item next to new-looking "trap" items.
 
-The domains are Amazon Video Games (static catalogue, where recency should not matter) and EB-NeRD news (volatile, where recency is a real signal).
+## Headline findings
 
-## Repository
+1. **No zero-shot model works in our setting.** Llama-2-7B, Qwen2.5-7B and Qwen2.5-32B (Li et al.'s own base model) sit at or below chance across all seven prompting methods. Before fine-tuning they have neither skill nor a strong date rule.
+2. **Fine-tuned on the cold-start protocol, every model learns the date shortcut.** This holds for both base models (Llama-2-7B, Qwen2.5-7B) on both datasets. The models look strong on the benchmark (Llama-2 on Amazon: 0.445 / 0.546 Recall@1, about 7× chance and above newest-first). But swapping the correct item's date takes them to about 0. Hiding or shuffling dates takes them to about chance. New-looking irrelevant items take the top spot 56–89% of the time on A1 (chance 20%).
+3. **The benchmark over-credits these models.** The Baseline score mostly measures "pick the newest". On news, fine-tuned models do not even beat the newest-first rule. On Amazon they beat it, but lose 43–47% of their accuracy when all candidates are new (A6).
+4. **Production-style training data does not remove the shortcut.** We trained on impression negatives (shown-but-not-clicked articles) for both models on EB-NeRD. Traps still win about 90% of top spots, and accuracy on hard negatives drops.
+5. **Neither does hiding dates in training.** A dates-hidden model still reacts to dates it never saw in training: traps still win 50% on A1. It also no longer beats newest-first. Hiding dates does not hide age.
+6. **Mixing old correct answers into training (the "50/50 fix") is the fair test.** Traps fall from 56% to 28% on A1 (chance 20%). But swapping dates still drops the model to about chance. Its Baseline score falls below newest-first, which shows how much of the original score the shortcut supplied.
+7. **Training the way Li et al. do (old correct items only, no new items at all) does not remove the date reliance either.** The cue comes from user behaviour, not from our data construction. Among old candidates, the clicked or bought item is the single newest one in about half of training pools (Amazon 51%, EB-NeRD 56%; chance 8%).
+   - **Amazon:** traps take **94%** of top spots, the strongest trap failure of any model, and it reproduces across two seeds. The benchmark scores this model *low* (below newest-first), which matches Li et al.'s weak cold-start numbers. Only the diagnostics show why.
+   - **EB-NeRD (seed 42, test):** swapping or hiding dates still collapses it. But it is *not* drawn to the traps (19%, at chance; with more traps, below chance), so the shortcut takes a different form on news: among all-old candidates it picks the newest 64% of the time, yet it ranks items dated after the user's history lower. It learned "newest among old items", not "newest overall".
+8. **Results are stable across seeds.** The date-trained Llama-2 was trained with three seeds on both datasets. Every drop replicates on every seed. Amazon varies little (Baseline SD ≈ 0.015). EB-NeRD varies more, so we report it as mean ± spread.
 
-| Path | What it is |
-|---|---|
-| [`report/`](report/) | LaTeX write-up; [`report/Report.pdf`](report/Report.pdf) is the current version |
-| [`plan.md`](plan.md) | Implementation plan for the baseline, with done / pending status per phase |
-| [`plan_adversarial.md`](plan_adversarial.md) | Plan for the adversarial variants (A1–A6) and the decomposition (Threads 2–3) |
-| [`design.md`](design.md) | Every design decision with its reason (§11 is the implementation log) |
-| [`code/`](code/) | The `coldrank` pipeline: split, warm ranker, pools, prompts, LLM inference, evaluation, tests. See [`code/README.md`](code/README.md) |
-| [`readings/`](readings/) | Key papers: Li et al. (the baseline), Fang et al. (closest prior work), Dong et al. (decomposition and settings) |
-| `data/`, `outputs/` | Datasets and run outputs. **Not in git**; rebuilt with the commands in `code/README.md` |
+**What we claim:** recency is a real and useful signal. Users do prefer new items, and the model is right to use it. The problem is that fine-tuned rerankers use it as a **shortcut** that overrides relevance, and the standard cold-start benchmark cannot tell the two apart. **What we do not claim:** that this is specific to LLMs, or that our training data replicates Netflix's.
+
+The full numbers, with every table, McNemar test and caveat, are in [`results.md`](results.md). Every design decision and its reason is in [`design.md`](design.md).
+
+## Experimental setup
+
+| | Amazon Video Games | EB-NeRD (news) |
+|---|---|---|
+| Test cutoff and window | 2022-09-01, 180 days | 2023-05-25, 1 day |
+| Users (dev / test) | 150 / 800 cold-target; 144 / 967 old-target | 150 / 800 cold-target; 150 / 1,000 old-target |
+| Warm ranker (stand-in for Netflix's) | SASRec | SASRec |
+| Fine-tuning data | 4,183 pools from 6 earlier cutoffs | 5,246 pools from 7 earlier cutoffs |
+
+- **Pools:** K = 15 candidates: the correct item, 12 warm (old) items from SASRec, and 2 new negatives, either random or hard (similar to the user). Li et al. use 50; at that size our small models only copied the prompt order, so we kept their 4:1 ratio at 15 (logged in design.md).
+- **Scoring:** pointwise Yes/No (TALLRec style), the only method above chance for any zero-shot model and free of parse failures and list-order effects. Listwise methods (Direct-Rec, Base, Fast, SSC, Structural) were run zero-shot only.
+- **Fine-tuning:** QLoRA (4-bit NF4, LoRA r16 / α32), 1 epoch, lr 2e-4, effective batch 32, on 4× RTX 2080 Ti (IIIT ADA cluster). Training prompts are byte-identical to the test prompts. Training users never appear in dev or test.
+- **Metrics:** Recall@1 (primary, as in Li et al.), reported as random / hard negatives; chance is 1/15 = 0.067. Trap@1 is how often a new-looking wrong item is ranked first: chance 0.20 on A1, rising with n on A5. Significance is exact McNemar paired by instance (\* = p < 0.05).
+
+### Adversarial variants
+
+Each variant changes **one factor** relative to a reference pool. Shared candidates stay in the same prompt positions.
+
+| Condition | What changes | Reference |
+|---|---|---|
+| Baseline | Li et al.'s protocol: correct item is new, true dates shown | — |
+| A2 Swap | The correct item's date is exchanged with an old wrong item's | Baseline |
+| A3 Hide | No dates on candidates or history | Baseline |
+| A4 Shuffle | Dates permuted across the candidates | Baseline |
+| A6 All-new | Every candidate is new, so dates cannot single out the correct item | Baseline users |
+| A1-ctrl | Correct item is **old**; nothing looks new | — |
+| A1 Traps | A1-ctrl plus 3 new, irrelevant "trap" items | A1-ctrl |
+| A5 Flood (n = 1, 2, 5, 10) | A1 plus *n* old wrong items relabelled with new dates | A1-ctrl |
+
+A quick read: a model using content should barely move on A2–A4 and should ignore traps. A model using the date rule collapses on A2–A4 and picks traps.
+
+### Training arms
+
+| Arm | Training data | Models and datasets | Seeds |
+|---|---|---|---|
+| **Date-trained** (main) | The cold-start protocol itself: correct item always new, dates shown | Llama-2 and Qwen2.5-7B × Amazon and EB-NeRD | Llama-2: 3 seeds on both datasets |
+| Impression negatives | Shown-but-not-clicked articles as negatives (production style) | Llama-2 and Qwen2.5-7B × EB-NeRD | 1 |
+| Dates-hidden control | Date-trained data with every date removed | Llama-2 × Amazon | 1 |
+| 50/50 fix | Half the pools have an old correct item | Llama-2 × Amazon | 1 |
+| **Li-style** (main) | Old correct items only, no new item anywhere (Li et al.'s setup) | Llama-2 × Amazon and EB-NeRD; Qwen2.5-7B planned | Amazon 2 so far; 3 planned on both |
+
+## Results in brief (test set unless noted)
+
+**Zero-shot.** Llama-2-7B scores 0.083 / 0.072 on Amazon and 0.055 / 0.054 on EB-NeRD. Qwen2.5-7B is below chance and avoids new items on content (A1 Trap@1 0.004 on Amazon). Qwen2.5-32B is at or near chance on all seven methods. One checkpoint, Llama-2 4-bit AWQ, shows a small date effect that disappears with the original fp16 weights. So the bias we report appears mainly *after* fine-tuning.
+
+**Date-trained models.** In every cell, A2 is about 0, A3 and A4 are at or below chance, and traps win far above the 20% chance level.
+
+| | Baseline | Newest-first | A2 Swap | A6 All-new | A1 Trap@1 |
+|---|---|---|---|---|---|
+| Llama-2, Amazon | 0.445 / 0.546 | 0.346 / 0.323 | 0.005 / 0.006 | 0.253 / 0.292 | 0.56 |
+| Qwen2.5-7B, Amazon | 0.432 / 0.532 | 0.321 / 0.316 | 0.015 / 0.014 | 0.152 / 0.297 | 0.60 |
+| Llama-2, EB-NeRD | 0.394 / 0.487 | 0.560 / 0.515 | 0.001 / 0.000 | 0.097 / 0.117 | 0.83 |
+| Qwen2.5-7B, EB-NeRD | 0.492 / 0.539 | 0.560 / 0.515 | 0.000 / 0.001 | 0.214 / 0.222 | 0.86 |
+
+**Other training arms** (Llama-2 on Amazon unless noted):
+
+| Arm | Baseline | A2 Swap | A1 Trap@1 | Reading |
+|---|---|---|---|---|
+| Date-trained | 0.445 / 0.546 | 0.005 / 0.006 | 0.56 | Over-credited by the benchmark |
+| Dates-hidden | 0.299 / 0.345 | 0.084 / 0.100 | 0.50 | Still follows dates it never saw in training |
+| 50/50 fix | 0.296 / 0.334 | 0.068 / 0.091 | 0.28 | Traps mostly neutralised; dates still dominate |
+| Li-style (seeds 42, 43) | 0.152 / 0.297, 0.170 / 0.296 | about 0.005 / 0.015 | 0.95, 0.94 | Scored low by the benchmark, strongest trap failure |
+| Impression, EB-NeRD (Llama-2 / Qwen) | 0.486 / 0.269, 0.406 / 0.194 | about 0 | 0.90, 0.89 | Production data keeps the shortcut |
+| Li-style, EB-NeRD (seed 42) | 0.324 / 0.282 | 0.020 / 0.021 | 0.19 | Date-reliant within old items, but avoids new-dated traps |
 
 ## Status
 
 | Part | Status |
 |---|---|
-| Amazon Video Games data, audit and global-cutoff split | ✅ Done: cutoff 2022-09-01, 180-day window, 950 test instances (150 dev / 800 test) |
-| Warm-start ranker (SASRec, stand-in for Netflix's ranker) | ✅ Done: validation NDCG@10 0.064; 3.7× popularity on older items |
-| Candidate pools (40 warm + 10 cold, random and hard negatives) | ✅ Done: 1,900 pools, all invariant checks pass |
-| Prompts for the five Li et al. methods + pointwise control | ✅ Implemented and tested; to be tuned on dev with the real models |
-| LLM inference (vLLM + HF fallback, caching, shuffles) | ✅ Implemented; ⏳ not yet run on the GPU |
-| Non-LLM reference rankers and evaluation | ✅ Done (results below) |
-| LLM runs on ADA (2080 Ti) | ⏳ Next |
-| Adversarial variant pools A1–A6 (+ A1-ctrl, A5 × 4) | ✅ Built and checked: 10 conditions, all invariants pass, heuristic sanity table below |
-| Decomposition script (Thread 3) | ✅ `code/coldrank/eval/decompose.py`, validated on the heuristics |
-| LLM runs on the variants | ⏳ Next |
-| EB-NeRD, QLoRA SFT | ⏳ Later |
+| Data, splits, SASRec, K = 15 pools and all adversarial variants (both datasets) | ✅ Done; invariants asserted on every pool |
+| Zero-shot runs (Llama-2-7B, Qwen2.5-7B, Qwen2.5-32B; 7 methods) | ✅ Done |
+| Date-trained fine-tunes (Llama-2, Qwen2.5-7B × both datasets; Llama-2 seeds 43, 44) | ✅ Done, dev and test |
+| Impression-negative fine-tunes (both models, EB-NeRD) | ✅ Done |
+| Dates-hidden control and 50/50 fix (Llama-2, Amazon) | ✅ Done |
+| Li-style, Llama-2: Amazon seeds 42 and 43; EB-NeRD seed 42 dev | ✅ Done |
+| Li-style, Llama-2: EB-NeRD seed 42 (dev + test) | ✅ Done |
+| Li-style, Llama-2: Amazon seed 44; EB-NeRD seeds 43, 44 | ⏳ Running on ADA |
+| Li-style, Qwen2.5-7B (one seed, both datasets) | ⏳ After the Llama runs |
+| Paper write-up | ⏳ In progress ([`progress/progress.pdf`](progress/progress.pdf) is the reference document) |
 
-## First results
+Fine-tuned adapters are uploaded privately to the ColdRank organisation on Hugging Face.
 
-Recall@1 of non-LLM rankers on the 800 Amazon Video Games test pools. These rankers see the same 50 candidates the LLMs will see. 95% confidence intervals are about ±0.02 to ±0.03.
+## Repository
 
-| Ranker | Random negatives | Hard negatives |
-|---|---|---|
-| Random | 0.029 | 0.024 |
-| Random among the 10 newest | 0.111 | 0.102 |
-| Newest first | 0.095 | 0.090 |
-| Text similarity only | 0.041 | 0.009 |
-| **10 newest, then text similarity** | **0.324** | 0.009 |
-| SASRec / popularity | 0.000 | 0.000 |
+| Path | What it is |
+|---|---|
+| [`results.md`](results.md) | Running log of every result table, with jobs, sample sizes, tests and caveats |
+| [`design.md`](design.md) | Every design decision with its reason; §11 is the implementation log |
+| [`progress/progress.pdf`](progress/progress.pdf) | Reference document for writing the paper: findings, evidence index and objections |
+| [`report/`](report/) | Earlier LaTeX write-up |
+| [`plan.md`](plan.md) | Original implementation plan |
+| [`code/`](code/) | The `coldrank` pipeline; see [`code/README.md`](code/README.md) |
+| [`readings/`](readings/) | Key papers: Li et al. (the baseline), Fang et al. (recency bias in LLM reranking), Dong et al. (cold-start diagnosis) |
+| `data/`, `outputs/` | Datasets and run outputs. **Not in git**; rebuilt with the commands in `code/README.md` |
 
-- Dates alone give about 0.10, five times random.
-- Restricting text similarity to the newest items raises it from 0.041 to 0.324.
-- An LLM has to beat 0.32 (random negatives) before its cold-start performance shows anything beyond the date shortcut.
-- No LLM results yet. A local CPU test with a tiny 135M model only checked that the pipeline runs; it says nothing about recency bias.
+Inside `code/coldrank/`:
 
-## Adversarial variants
+| Module | Role |
+|---|---|
+| `data/`, `warm/`, `pools/` | Parsing, audit, temporal split, SASRec, K = 15 candidate pools |
+| `adversarial/` | Builds and checks A1–A6, A1-ctrl and A5 |
+| `prompts/`, `llm/` | Prompt rendering (7 methods, letter codes) and inference (vLLM with an HF fallback) |
+| `finetune/` | Training pools at earlier cutoffs (`trainpools.py`), impression data (`impressions.py`), 50/50 and Li-style pools (`oldmix.py`), SFT data (`sft_data.py`), QLoRA training (`train.py`), adapter merge (`merge.py`) |
+| `baselines/`, `eval/` | Newest-first and other heuristics, metrics (Recall@1, Trap@1), McNemar tests, decomposition |
 
-Each variant changes **one factor** relative to a reference pool, so recency and relevance can be separated (report §3.5). All of the code is in [`code/coldrank/adversarial/`](code/coldrank/adversarial/). The pool files are written next to the baseline ones in `data/processed/amazon_vg/split_T2022-09-01_w180/pools/<condition>_<neg>_<split>.jsonl`.
-
-| Condition | What changes | Reference | Built by | Pools (dev / test) |
-|---|---|---|---|---|
-| `baseline` | 40 warm + gold + 9 cold; true dates | — | `pools/build.py` → `build_pools()` | 150 / 800 per neg |
-| `a2_swap` | Displayed dates of the gold and one random warm item exchanged | baseline | `adversarial/date_variants.py` → `make_a2_swap()` | 150 / 800 per neg |
-| `a3_hide` | No dates on candidates **or** history | baseline | `date_variants.py` → `make_a3_hide()` | 150 / 800 per neg |
-| `a4_shuffle` | Displayed dates permuted across all 50 candidates | baseline | `date_variants.py` → `make_a4_shuffle()` | 150 / 800 per neg |
-| `a6_allcold` | Gold + 49 cold negatives (random / hard); recency no longer separates the gold | baseline instances | `adversarial/allcold.py` → `build_a6()` | 150 / 799 per neg |
-| `a1_oldgold` | Old (warm) gold + 39 SASRec warm items + 10 **traps** (new, low-similarity items) | old-target instances | `adversarial/oldgold.py` → `build_oldgold()` | 144 / 967 |
-| `a1ctrl` | A1 with the 10 trap slots refilled by SASRec warm ranks 40–49 | A1 | `oldgold.py` → `build_oldgold()` | 144 / 967 |
-| `a5_n{1,2,5,10}` | A1 + the *n* least similar warm negatives relabeled with new dates | A1 | `oldgold.py` → `build_oldgold()` | 144 / 967 each |
-
-*neg* = `random` and `hard` for baseline, A2–A4 and A6, and `trap` for the A1 family.
-
-### How it fits together
-
-| File | Function | Role |
-|---|---|---|
-| `adversarial/common.py` | `derive()` | Copies a reference pool as a new condition. It keeps the candidate order slot by slot and sets `shuffle_key` to the reference, so the prompt shuffles put shared candidates in the **same positions**. |
-| | `annotate()` | Sets each candidate's `role` (`gold`, `warm`, `cold_neg`, `trap`, `relabeled`, `ctrl_fill`) and `new_dated` (does its *displayed* date fall after the cutoff?). |
-| | `extended_embeddings()` | Reuses the baseline item embeddings unchanged and encodes only missing items into `item_embeddings_adv.npz`. |
-| `adversarial/checks.py` | `check_date_variant()`, `check_a6()`, `check_a1()`, `check_a1ctrl()`, `check_a5()` | Invariants asserted on **every** pool. Examples: A2 changes exactly two dates; A3 leaves no date anywhere; A4 keeps the same set of dates; A1 traps are new and below the similarity threshold; A1-ctrl has nothing new-dated; A5 relabels exactly the *n* least similar warm items. |
-| | `manipulation_stats()` | Similarity and age statistics per condition, written to `pools/variant_stats.json`. |
-| `adversarial/build.py` | `main()` | Builds everything, runs the checks and writes the files: `python -m coldrank.adversarial.build` (or `--only a2_swap,a3_hide`). |
-| `pools/build.py` | `eligible_cold()`, `cold_catalogue()`, `history_records()` | Eligibility rules shared with the baseline: a new negative must have launched between the cutoff and the purchase, must not be one of the user's items and must not be a near-duplicate of the gold. Extracted unchanged; the baseline pools regenerate byte-identical. |
-| `prompts/render.py` | `shuffled_candidates()` | Shuffles by `shuffle_key` when present. Baseline pools have no key, so baseline prompts are unchanged. |
-| `eval/metrics.py` | `pool_metrics()` | **Cold@1** counts items that *look* new (`new_dated`). **Trap@1** = the top item is a trap or relabeled item (on A1-ctrl: a fill item). |
-
-Settings are in `code/configs/amazon_vg.yaml` under `adversarial:`. Unit tests are in `code/tests/test_adversarial.py`.
-
-### Sanity check: non-LLM rankers on each variant (test, Recall@1)
-
-| Condition | Random | Random among 10 newest | Newest first | Text similarity | 10 newest + text |
-|---|---|---|---|---|---|
-| baseline (random neg.) | 0.029 | 0.111 | 0.095 | 0.041 | 0.324 |
-| A2 swap | 0.024 | **0.000** | **0.000** | 0.041 | **0.000** |
-| A3 hide | 0.022 | 0.022 | 0.022 | 0.041 | 0.041 |
-| A4 shuffle | 0.024 | 0.031 | 0.021 | 0.041 | 0.028 |
-| A6 all-cold | 0.026 | 0.018 | 0.040 | 0.110 | 0.061 |
-| A1 old-gold | 0.022 | 0.000 | 0.000 (picks a trap 100%) | 0.039 | 0.000 |
-| A1-ctrl | 0.018 | 0.068 | **0.413** | 0.033 | 0.068 |
-| A5 (any n) | ≈ 0.02 | 0.000 | 0.000 (picks a trap 100%) | 0.039 | 0.000 |
-
-- Date-based rankers collapse exactly where the dates stop pointing at the gold (A2, A3, A4, A6, A1, A5), and text similarity is unaffected by date-only changes. This confirms the variants are built correctly.
-- **Manipulation checks:** traps are much less similar to the user than the gold (0.30 vs 0.52) and about 2 years newer (median 706 days).
-- **Finding (A1-ctrl):** among *older* items too, the item a user buys next tends to be the most recently launched one; newest-first gets it right 41% of the time. Recency therefore points to the gold even within the warm items, and the trap effect (A1-ctrl − A1) includes this.
+Configs are in `code/configs/`: `amazon_vg.yaml` and `ebnerd.yaml` for the protocol, `finetune*.yaml` for one file per training arm and seed, and `models.yaml` for pinned checkpoints and adapters.
 
 ## Getting started
 
 ```bash
-# 1. Environment (cluster: Python 3.10 + CUDA; see code/requirements.txt)
+# Environment (Python 3.10 + CUDA)
 python -m venv .venv && source .venv/bin/activate
 pip install -r code/requirements.txt
-
-# 2. Data + pipeline: run from code/, in the order given in code/README.md
 cd code
-python -m coldrank.data.amazon_vg        # after downloading the raw files
+
+# Data and pools (CPU, except SASRec); --config ebnerd for news
 python -m coldrank.data.split
 python -m coldrank.warm.sasrec
 python -m coldrank.pools.build
+python -m coldrank.adversarial.build
 python -m coldrank.baselines.heuristics --split test
-python -m coldrank.eval.report --split test
-python -m coldrank.adversarial.build      # all variant pools (CPU, a few minutes)
-python -m coldrank.baselines.heuristics --condition a2_swap --split test
 
-# 3. LLM runs (GPU)
-python -m coldrank.llm.run --model llama2_7b --method direct --split dev --neg random
+# Fine-tuning and evaluation on ADA (SLURM)
+sbatch --export=ALL,CONFIG=amazon_vg,FT_CONFIG=finetune scripts/ft_train.sbatch
+sbatch --export=ALL,STAGE=ft-test,MODEL=llama2_7b_ft_amazon_vg,CONFIG=amazon_vg,TP=2 scripts/llm_ada.sbatch
 
 # Tests
 python -m pytest -q -m "not slow"
 ```
 
-Things to know:
-- Configs live in `code/configs/` (`amazon_vg.yaml` for the protocol, `models.yaml` for the pinned model checkpoints).
-- Set `HF_HUB_OFFLINE=1` once models are downloaded. Model loading can otherwise hang on a stalled Hugging Face connection.
-- On the dev machine, `USE_TF=0` is already set inside the package; it avoids a TensorFlow/Keras clash with `transformers`.
-
-## Decomposition (Thread 3)
-
-`python -m coldrank.eval.decompose --split test` reads every `preds.jsonl` (LLMs and heuristics) and writes `outputs/amazon_vg/decomposition_test/{rates.csv, decomposition.csv, summary.md}`. It is implemented in `code/coldrank/eval/decompose.py`: `load_outcomes()` → `decompose()` → `summary_md()`; the statistics are in `code/coldrank/eval/stats.py`.
-
-| Quantity | Definition | Test |
-|---|---|---|
-| ∆evidence | R_hide − 1/50 | Bootstrap CI |
-| ∆recency | R_true − R_hide | Paired bootstrap + McNemar |
-| Swap sensitivity | R_true − R_swap | Paired |
-| Shuffle / all-cold effect | R_true − R_shuffle, R_true − R_allcold | Paired |
-| Trap effect | R_A1-ctrl − R_A1 | Paired |
-| Flood slope | Slope of Recall@1 over n = 0 (A1), 1, 2, 5, 10 | Bootstrap over instances |
-| Flood lift | How much more often a relabeled item is ranked first once it looks new (0 for date-blind rankers) | Paired |
-| Over-crediting gap | R_baseline − R_A1 | Unpaired (different instances) |
-
-Validation on the heuristics (test, random negatives): text similarity, which never reads dates, has ∆recency = 0. "10 newest + text" has ∆recency = +0.282 and swap sensitivity = +0.324 (both p < 0.05).
-
-## Next steps
-
-1. **Baseline LLM runs** (in progress): dev, then test, once prompts are frozen.
-2. **LLM runs on the variants:** Direct-Rec and pointwise on all conditions; the reasoning methods on A1, A1-ctrl, A2 and A3. Use `--condition <name>`, and `--neg trap` for the A1 family. Then run `python -m coldrank.eval.decompose`.
-3. **Remaining code:** the exposure check (known/unknown items), the position-effect analysis, and the EB-NeRD port.
+The full step list, with outputs, is in [`code/README.md`](code/README.md). Things to know:
+- Set `HF_HUB_OFFLINE=1` once the models are downloaded; loading can otherwise hang on a stalled Hugging Face connection.
+- On ADA, use `--constraint=2080ti` and exclude the nodes listed in design.md, which had hung I/O or a full disk.

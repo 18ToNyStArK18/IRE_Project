@@ -199,6 +199,57 @@ llama2_7b_ftoldmix_amazon_vg_s44:
   vllm:
     tensor_parallel_size: 2
 
+# Li-style control on EB-NeRD (seed 42) and with other training seeds on both datasets (finetune_oldonly*.yaml; design.md).
+llama2_7b_ftoldonly_ebnerd:
+  base: llama2_7b_fp16
+  adapter: outputs/finetune/ebnerd/llama2_7b_oldonly/adapter
+  family: llama2
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 2
+
+llama2_7b_ftoldonly_amazon_vg_s43:
+  base: llama2_7b_fp16
+  adapter: outputs/finetune/amazon_vg/llama2_7b_oldonly_s43/adapter
+  family: llama2
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 2
+
+llama2_7b_ftoldonly_amazon_vg_s44:
+  base: llama2_7b_fp16
+  adapter: outputs/finetune/amazon_vg/llama2_7b_oldonly_s44/adapter
+  family: llama2
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 2
+
+llama2_7b_ftoldonly_ebnerd_s43:
+  base: llama2_7b_fp16
+  adapter: outputs/finetune/ebnerd/llama2_7b_oldonly_s43/adapter
+  family: llama2
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 2
+
+llama2_7b_ftoldonly_ebnerd_s44:
+  base: llama2_7b_fp16
+  adapter: outputs/finetune/ebnerd/llama2_7b_oldonly_s44/adapter
+  family: llama2
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+  vllm:
+    tensor_parallel_size: 2
+
 # The date-trained Llama-2 models with other training seeds (finetune_s43.yaml, finetune_s44.yaml; design.md).
 llama2_7b_ft_amazon_vg_s43:
   base: llama2_7b_fp16
@@ -273,6 +324,34 @@ qwen25_7b_ft_amazon_vg:
 qwen25_7b_ft_ebnerd:
   base: qwen25_7b_fp16
   adapter: outputs/finetune/ebnerd/qwen25_7b/adapter
+  quantization: bitsandbytes
+  verify_tol: 0.15
+  # its log-odds on wrong candidates are about -18, so "Yes" falls below the default top-500 list
+  # the exact check reads (job 45077); 150,000 of Qwen2.5's 152,064 logits covers it
+  exact_topk: 150000
+  family: chatml
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+
+# Qwen2.5-7B Li-style control (finetune_qwen25_ada_oldonly.yaml; design.md), evaluation settings as qwen25_7b_ft_ebnerd.
+qwen25_7b_ftoldonly_amazon_vg:
+  base: qwen25_7b_fp16
+  adapter: outputs/finetune/amazon_vg/qwen25_7b_oldonly/adapter
+  quantization: bitsandbytes
+  verify_tol: 0.15
+  # its log-odds on wrong candidates are about -18, so "Yes" falls below the default top-500 list
+  # the exact check reads (job 45077); 150,000 of Qwen2.5's 152,064 logits covers it
+  exact_topk: 150000
+  family: chatml
+  max_model_len: 4096
+  listwise: false
+  trust_remote_code: false
+
+# Qwen2.5-7B Li-style control (finetune_qwen25_ada_oldonly.yaml; design.md), evaluation settings as qwen25_7b_ft_ebnerd.
+qwen25_7b_ftoldonly_ebnerd:
+  base: qwen25_7b_fp16
+  adapter: outputs/finetune/ebnerd/qwen25_7b_oldonly/adapter
   quantization: bitsandbytes
   verify_tol: 0.15
   # its log-odds on wrong candidates are about -18, so "Yes" falls below the default top-500 list
