@@ -639,3 +639,57 @@ Li-style Recall@1 change from A1-ctrl: A1 −0.016 (n.s.), A5 −0.025\* to −0
 **Top pick is the newest candidate (test):** Baseline random / hard: date-trained 0.384 / 0.469, impression 0.390 / 0.320, Li-style 0.291 / 0.237 (correct item newest 0.556 / 0.511). A1-ctrl (all candidates old): date-trained 0.233, impression 0.181, Li-style **0.639** (correct item newest 0.602). A1 Traps (a trap is always newest): date-trained 0.334, impression 0.286, Li-style **0.070**.
 
 **Summary (test confirms dev).** On EB-NeRD the Li-style model is **not** taken by the traps, unlike on Amazon (0.945). A1 Trap@1 is 0.194, at chance (0.20), against 0.828 for date-trained and 0.898 for impression. With more traps it stays **below** chance (A5 n = 10: 0.367 vs 0.867), so it ranks items dated after the user's history *lower* than average. Recall@1 under traps (0.654) is almost unchanged from A1-ctrl (0.670). It still leans on dates *within the old range*: among all-old candidates its top pick is the newest one 64% of the time, and swapping or hiding dates collapses it (A2 0.020 / 0.021, A3 0.059 / 0.062). It learned "newest among old items", not "newest overall". On the cold benchmark it is below both date-trained and newest-first (−0.236\* / −0.233\* vs newest-first).
+
+## Llama-2-7B Li-style control, third training seed (44), Amazon Video Games — test set, and three-seed mean ± SD (2026-11-04)
+
+**Model.** Li-style Llama-2-7B-Chat, seed 44: training job 56417 (1 h 40 min, gnode065, final validation loss 0.274; seeds 42 / 43: 0.266 / 0.271), evaluation job 56418. Same SFT data and settings as seeds 42 and 43.
+
+**Evaluation.** The same Amazon VG test pools as the seed-42 and seed-43 sections (800 per cold-target cell, A6 799, 967 per old-target cell); complete rankings for every pool. Recall@1 as random / hard negatives (chance 0.067); Trap@1 chance A1 0.20, A5 n = 1, 2, 5, 10: 0.267, 0.333, 0.533, 0.867. \* = paired McNemar p < 0.05. Mean ± sample SD over seeds 42, 43, 44.
+
+| Ablation | Recall@1, s44 | s44 − s42 | Change from Baseline (s44) | Recall@1, mean ± SD (3 seeds) |
+|---|---|---|---|---|
+| Baseline | 0.158 / 0.302 | +0.005 / +0.005 | — | 0.160 ± 0.009 / 0.298 ± 0.003 |
+| A2 Swap | 0.001 / 0.005 | −0.005 / −0.010\* | −0.156\* / −0.297\* | 0.004 ± 0.003 / 0.012 ± 0.006 |
+| A3 Hide | 0.116 / 0.271 | −0.009 / +0.021 | −0.041\* / −0.031 | 0.119 ± 0.005 / 0.258 ± 0.011 |
+| A4 Shuffle | 0.100 / 0.107 | −0.010 / −0.007 | −0.058\* / −0.195\* | 0.108 ± 0.007 / 0.112 ± 0.004 |
+| A6 All-new | 0.015 / 0.088 | −0.009 / −0.006 | −0.141\* / −0.215\* | 0.019 ± 0.005 / 0.090 ± 0.003 |
+
+| Ablation | Recall@1, s44 | Trap@1, s44 | Trap@1 s44 vs date-trained | Recall@1 mean ± SD | Trap@1 mean ± SD |
+|---|---|---|---|---|---|
+| A1-ctrl | 0.564 | 0.104 | −0.023 | 0.572 ± 0.008 | — |
+| A1 Traps | 0.036 | **0.957** | +0.395\* | 0.041 ± 0.006 | **0.947 ± 0.010** |
+| A5 n = 1 | 0.034 | 0.961 | +0.285\* | — | 0.952 ± 0.009 |
+| A5 n = 2 | 0.033 | 0.964 | +0.226\* | — | 0.955 ± 0.008 |
+| A5 n = 5 | 0.029 | 0.970 | +0.125\* | — | 0.962 ± 0.007 |
+| A5 n = 10 | 0.029 | 0.971 | +0.041\* | — | 0.965 ± 0.005 |
+
+Newest-first: 0.346 / 0.323 (Baseline), 0.523 (A1-ctrl). s44 minus newest-first on Baseline: −0.189\* / −0.020 (n.s.).
+
+**Summary.** Seed 44 reproduces seeds 42 and 43. The only significant seed difference is A2 hard (−0.010\*, both near zero). Over three seeds, traps take **94.7% ± 1.0%** of top spots on A1 (chance 20%), swapping the correct item's date leaves 0.004 / 0.012 Recall@1, and the Baseline score (0.160 / 0.298) stays below newest-first on random negatives. The Amazon Li-style finding is stable across training seeds.
+
+## Llama-2-7B Li-style control, second training seed (43), EB-NeRD — test set (2026-11-04)
+
+**Model.** Li-style Llama-2-7B-Chat on EB-NeRD, seed 43: training job 56419 (5 h 03 min, gnode065, final validation loss 0.142; seed 42: 0.139), evaluation job 56420. Same SFT data (5,246 pools from the top-up collect) and settings as seed 42.
+
+**Evaluation.** The same EB-NeRD test pools as the seed-42 test section (800 per cold-target cell, A6 650, 1,000 per trap cell); complete rankings for every pool. Recall@1 as random / hard negatives (chance 0.067); Trap@1 chance A1 0.20, A5 n = 1, 2, 5, 10: 0.267, 0.333, 0.533, 0.867. \* = paired McNemar p < 0.05. Seed 44 is training (56421/56422); mean ± SD follows it.
+
+| Ablation | Recall@1, Li-style s42 | Recall@1, Li-style s43 | s43 − s42 | Change from Baseline (s43) | s43 vs date-trained |
+|---|---|---|---|---|---|
+| Baseline | 0.324 / 0.282 | 0.234 / 0.242 | −0.090\* / −0.040\* | — | −0.160\* / −0.245\* |
+| A2 Swap | 0.020 / 0.021 | 0.025 / 0.028 | +0.005 / +0.006 | −0.209\* / −0.215\* | +0.024\* / +0.028\* |
+| A3 Hide | 0.059 / 0.062 | 0.072 / 0.076 | +0.014 / +0.014 | −0.161\* / −0.166\* | +0.059\* / +0.064\* |
+| A4 Shuffle | 0.066 / 0.056 | 0.061 / 0.062 | −0.005 / +0.006 | −0.172\* / −0.180\* | +0.026\* / +0.031\* |
+| A6 All-new | 0.140 / 0.165 | 0.149 / 0.140 | +0.009 / −0.025 | −0.100\* / −0.122\* | +0.052\* / +0.023 |
+
+| Ablation | Recall@1, s42 → s43 | Trap@1, s42 → s43 | Trap@1 s43 − s42 | Trap@1 s43 vs date-trained |
+|---|---|---|---|---|
+| A1-ctrl | 0.670 → 0.665 | 0.144 → 0.144 | +0.000 | −0.058\* |
+| A1 Traps | 0.654 → 0.676 | 0.194 → **0.133** | −0.061\* | −0.695\* |
+| A5 n = 1 | 0.645 → 0.674 | 0.224 → 0.159 | −0.065\* | −0.687\* |
+| A5 n = 2 | 0.638 → 0.677 | 0.249 → 0.174 | −0.075\* | −0.676\* |
+| A5 n = 5 | 0.625 → 0.692 | 0.314 → 0.220 | −0.094\* | −0.638\* |
+| A5 n = 10 | 0.630 → 0.702 | 0.367 → 0.288 | −0.079\* | −0.600\* |
+
+Newest-first: 0.560 / 0.515 (Baseline), 0.603 (A1-ctrl). s43 minus newest-first on Baseline: −0.326\* / −0.273\*.
+
+**Summary.** Seed 43 reproduces the qualitative EB-NeRD Li-style result and makes it stronger: traps take only 13.3% of top spots on A1 (chance 20%) and stay well below chance with more traps (A5 n = 10: 0.288 vs 0.867), so new-dated items are pushed down. Swapping or hiding dates still collapses it (0.025 / 0.028, 0.072 / 0.076). Unlike Amazon, the seeds differ in size on EB-NeRD: Baseline is lower for s43 (−0.090\* / −0.040\*) and trap avoidance is stronger (−0.061\* on A1), so the EB-NeRD Li-style numbers vary more across seeds than the Amazon ones. Both seeds sit well below newest-first on the cold benchmark.

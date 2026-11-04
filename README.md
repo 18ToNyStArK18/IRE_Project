@@ -22,8 +22,8 @@ We answer this in three steps:
 5. **Neither does hiding dates in training.** A dates-hidden model still reacts to dates it never saw in training: traps still win 50% on A1. It also no longer beats newest-first. Hiding dates does not hide age.
 6. **Mixing old correct answers into training (the "50/50 fix") is the fair test.** Traps fall from 56% to 28% on A1 (chance 20%). But swapping dates still drops the model to about chance. Its Baseline score falls below newest-first, which shows how much of the original score the shortcut supplied.
 7. **Training the way Li et al. do (old correct items only, no new items at all) does not remove the date reliance either.** The cue comes from user behaviour, not from our data construction. Among old candidates, the clicked or bought item is the single newest one in about half of training pools (Amazon 51%, EB-NeRD 56%; chance 8%).
-   - **Amazon:** traps take **94%** of top spots, the strongest trap failure of any model, and it reproduces across two seeds. The benchmark scores this model *low* (below newest-first), which matches Li et al.'s weak cold-start numbers. Only the diagnostics show why.
-   - **EB-NeRD (seed 42, test):** swapping or hiding dates still collapses it. But it is *not* drawn to the traps (19%, at chance; with more traps, below chance), so the shortcut takes a different form on news: among all-old candidates it picks the newest 64% of the time, yet it ranks items dated after the user's history lower. It learned "newest among old items", not "newest overall".
+   - **Amazon:** traps take **95%** of top spots (94.7% ± 1.0% over three seeds), the strongest trap failure of any model. The benchmark scores this model *low* (below newest-first), which matches Li et al.'s weak cold-start numbers. Only the diagnostics show why.
+   - **EB-NeRD (seeds 42, 43, test):** swapping or hiding dates still collapses it. But it is *not* drawn to the traps (19% and 13%, at or below chance; with more traps, well below chance), so the shortcut takes a different form on news: among all-old candidates it picks the newest 64% of the time, yet it ranks items dated after the user's history lower. It learned "newest among old items", not "newest overall".
 8. **Results are stable across seeds.** The date-trained Llama-2 was trained with three seeds on both datasets. Every drop replicates on every seed. Amazon varies little (Baseline SD ≈ 0.015). EB-NeRD varies more, so we report it as mean ± spread.
 
 **What we claim:** recency is a real and useful signal. Users do prefer new items, and the model is right to use it. The problem is that fine-tuned rerankers use it as a **shortcut** that overrides relevance, and the standard cold-start benchmark cannot tell the two apart. **What we do not claim:** that this is specific to LLMs, or that our training data replicates Netflix's.
@@ -69,7 +69,7 @@ A quick read: a model using content should barely move on A2–A4 and should ign
 | Impression negatives | Shown-but-not-clicked articles as negatives (production style) | Llama-2 and Qwen2.5-7B × EB-NeRD | 1 |
 | Dates-hidden control | Date-trained data with every date removed | Llama-2 × Amazon | 1 |
 | 50/50 fix | Half the pools have an old correct item | Llama-2 × Amazon | 1 |
-| **Li-style** (main) | Old correct items only, no new item anywhere (Li et al.'s setup) | Llama-2 × Amazon and EB-NeRD; Qwen2.5-7B planned | Amazon 2 so far; 3 planned on both |
+| **Li-style** (main) | Old correct items only, no new item anywhere (Li et al.'s setup) | Llama-2 × Amazon and EB-NeRD; Qwen2.5-7B planned | Amazon 3; EB-NeRD 2 so far, 3rd running |
 
 ## Results in brief (test set unless noted)
 
@@ -91,9 +91,9 @@ A quick read: a model using content should barely move on A2–A4 and should ign
 | Date-trained | 0.445 / 0.546 | 0.005 / 0.006 | 0.56 | Over-credited by the benchmark |
 | Dates-hidden | 0.299 / 0.345 | 0.084 / 0.100 | 0.50 | Still follows dates it never saw in training |
 | 50/50 fix | 0.296 / 0.334 | 0.068 / 0.091 | 0.28 | Traps mostly neutralised; dates still dominate |
-| Li-style (seeds 42, 43) | 0.152 / 0.297, 0.170 / 0.296 | about 0.005 / 0.015 | 0.95, 0.94 | Scored low by the benchmark, strongest trap failure |
+| Li-style (3 seeds, mean) | 0.160 / 0.298 | 0.004 / 0.012 | 0.95 | Scored low by the benchmark, strongest trap failure |
 | Impression, EB-NeRD (Llama-2 / Qwen) | 0.486 / 0.269, 0.406 / 0.194 | about 0 | 0.90, 0.89 | Production data keeps the shortcut |
-| Li-style, EB-NeRD (seed 42) | 0.324 / 0.282 | 0.020 / 0.021 | 0.19 | Date-reliant within old items, but avoids new-dated traps |
+| Li-style, EB-NeRD (seeds 42, 43) | 0.324 / 0.282, 0.234 / 0.242 | about 0.02 / 0.02 | 0.19, 0.13 | Date-reliant within old items, but avoids new-dated traps |
 
 ## Status
 
@@ -104,9 +104,8 @@ A quick read: a model using content should barely move on A2–A4 and should ign
 | Date-trained fine-tunes (Llama-2, Qwen2.5-7B × both datasets; Llama-2 seeds 43, 44) | ✅ Done, dev and test |
 | Impression-negative fine-tunes (both models, EB-NeRD) | ✅ Done |
 | Dates-hidden control and 50/50 fix (Llama-2, Amazon) | ✅ Done |
-| Li-style, Llama-2: Amazon seeds 42 and 43; EB-NeRD seed 42 dev | ✅ Done |
-| Li-style, Llama-2: EB-NeRD seed 42 (dev + test) | ✅ Done |
-| Li-style, Llama-2: Amazon seed 44; EB-NeRD seeds 43, 44 | ⏳ Running on ADA |
+| Li-style, Llama-2: Amazon seeds 42, 43, 44; EB-NeRD seeds 42 (dev + test), 43 | ✅ Done |
+| Li-style, Llama-2: EB-NeRD seed 44 | ⏳ Running on ADA |
 | Li-style, Qwen2.5-7B (one seed, both datasets) | ⏳ After the Llama runs |
 | Paper write-up | ⏳ In progress ([`progress/progress.pdf`](progress/progress.pdf) is the reference document) |
 
