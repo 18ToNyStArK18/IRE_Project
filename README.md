@@ -23,7 +23,7 @@ We answer this in three steps:
 6. **Mixing old correct answers into training (the "50/50 fix") is the fair test.** Traps fall from 56% to 28% on A1 (chance 20%). But swapping dates still drops the model to about chance. Its Baseline score falls below newest-first, which shows how much of the original score the shortcut supplied.
 7. **Training the way Li et al. do (old correct items only, no new items at all) does not remove the date reliance either.** The cue comes from user behaviour, not from our data construction. Among old candidates, the clicked or bought item is the single newest one in about half of training pools (Amazon 51%, EB-NeRD 56%; chance 8%).
    - **Amazon:** traps take **95%** of top spots (94.7% ± 1.0% over three seeds), the strongest trap failure of any model. Qwen2.5-7B trained the same way repeats it (97%), so it is not specific to one base model. The benchmark scores this model *low* (below newest-first), which matches Li et al.'s weak cold-start numbers. Only the diagnostics show why.
-   - **EB-NeRD (three seeds, test):** swapping or hiding dates still collapses it. But it is *not* drawn to the traps (15.6% ± 3.3%, below chance on every seed; with more traps, well below chance), so the shortcut takes a different form on news: among all-old candidates it picks the newest 64% of the time, yet it ranks items dated after the user's history lower. It learned "newest among old items", not "newest overall".
+   - **EB-NeRD (three seeds, test):** swapping or hiding dates still collapses it. But it is *not* drawn to the traps (15.6% ± 3.3%, below chance on every seed; with more traps, well below chance), so the shortcut takes a different form on news: among all-old candidates it picks the newest 64% of the time, yet it ranks items dated after the user's history lower. It learned "newest among old items", not "newest overall". Qwen2.5-7B trained the same way repeats this almost cell for cell (traps 19%), so the dataset, not the base model, decides the form of the shortcut.
 8. **Results are stable across seeds.** The date-trained Llama-2 was trained with three seeds on both datasets. Every drop replicates on every seed. Amazon varies little (Baseline SD ≈ 0.015). EB-NeRD varies more, so we report it as mean ± spread.
 
 **What we claim:** recency is a real and useful signal. Users do prefer new items, and the model is right to use it. The problem is that fine-tuned rerankers use it as a **shortcut** that overrides relevance, and the standard cold-start benchmark cannot tell the two apart. **What we do not claim:** that this is specific to LLMs, or that our training data replicates Netflix's.
@@ -95,6 +95,7 @@ A quick read: a model using content should barely move on A2–A4 and should ign
 | Li-style, Qwen2.5-7B | 0.149 / 0.383 | 0.000 / 0.006 | 0.97 | Same as Llama-2 Li-style |
 | Impression, EB-NeRD (Llama-2 / Qwen) | 0.486 / 0.269, 0.406 / 0.194 | about 0 | 0.90, 0.89 | Production data keeps the shortcut |
 | Li-style, EB-NeRD (3 seeds, mean) | 0.281 / 0.266 | 0.022 / 0.027 | 0.16 | Date-reliant within old items, but avoids new-dated traps |
+| Li-style, EB-NeRD, Qwen2.5-7B | 0.305 / 0.256 | 0.021 / 0.021 | 0.19 | Same as Llama-2 Li-style on news |
 
 ## Status
 
@@ -106,8 +107,7 @@ A quick read: a model using content should barely move on A2–A4 and should ign
 | Impression-negative fine-tunes (both models, EB-NeRD) | ✅ Done |
 | Dates-hidden control and 50/50 fix (Llama-2, Amazon) | ✅ Done |
 | Li-style, Llama-2: three seeds on both datasets | ✅ Done |
-| Li-style, Qwen2.5-7B, one seed: Amazon | ✅ Done, dev and test |
-| Li-style, Qwen2.5-7B, one seed: EB-NeRD | ⏳ Running on ADA |
+| Li-style, Qwen2.5-7B, one seed, both datasets | ✅ Done, dev and test |
 | Paper write-up | ⏳ In progress ([`progress/progress.pdf`](progress/progress.pdf) is the reference document) |
 
 Fine-tuned adapters are uploaded privately to the ColdRank organisation on Hugging Face.

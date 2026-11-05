@@ -759,3 +759,41 @@ Newest-first: 0.346 / 0.323 (Baseline), 0.523 (A1-ctrl). Qwen Li-style minus new
 - **Dates decide:** swapping the correct item's date gives 0.000 / 0.006, shuffling −0.046\* / −0.276\*; with only new candidates (A6) it is at or below chance on random negatives (0.019).
 - **Benchmark score:** 0.149 / 0.383, below newest-first on random negatives (−0.198\*) and above it on hard negatives (+0.060\*); hard negatives are old by construction, so a recency rule separates them easily.
 - Caveats: one seed; 4-bit evaluation; the Qwen date-trained comparison is unpaired (different pools).
+
+## Qwen2.5-7B Li-style control (old correct items only, no new items in training), EB-NeRD — dev and test (2026-11-05)
+
+**Model.** Qwen2.5-7B-Instruct (`a09a35458c`), `finetune_qwen25_ada_oldonly.yaml` (uniform Qwen recipe, seed 42, one seed by user decision), on the same EB-NeRD Li-style SFT pools as the Llama-2 Li-style models (29,916 train / 1,560 validation examples). Training job 57633 (4 h 34 min, gnode065, final validation loss 0.137; Llama-2 Li-style seed 42: 0.139), dev job 57634, test job 57635 (6 h 40 min). Evaluated 4-bit (vLLM bitsandbytes), like every Qwen run.
+
+**Comparators (all paired, same pools).** **Qwen date-trained** = `qwen25_7b_ft_ebnerd`; **Qwen impression** = `qwen25_7b_ftimp_ebnerd`; **Llama Li-style** = `llama2_7b_ftoldonly_ebnerd` (seed 42). Recall@1 as random / hard negatives (chance 0.067); Trap@1 chance A1 0.20, A5 0.267 / 0.333 / 0.533 / 0.867. \* = paired McNemar p < 0.05.
+
+**Test** (800 per cold-target cell, A6 650, 1,000 per trap cell; complete rankings):
+
+| Ablation | Recall@1, Qwen date-trained | Recall@1, Qwen Li-style | Change (Qwen Li-style) | vs Qwen date-trained | vs Llama Li-style |
+|---|---|---|---|---|---|
+| Baseline | 0.492 / 0.539 | 0.305 / 0.256 | — | −0.188\* / −0.282\* | −0.019 / −0.026 |
+| A2 Swap | 0.000 / 0.001 | 0.021 / 0.021 | −0.284\* / −0.235\* | +0.021\* / +0.020\* | +0.001 / +0.000 |
+| A3 Hide | 0.011 / 0.010 | 0.022 / 0.022 | −0.282\* / −0.234\* | +0.011 / +0.013 | −0.036\* / −0.040\* |
+| A4 Shuffle | 0.048 / 0.043 | 0.062 / 0.048 | −0.242\* / −0.209\* | +0.015 / +0.005 | −0.004 / −0.009 |
+| A6 All-new | 0.214 / 0.222 | 0.148 / 0.140 | −0.183\* / −0.137\* | −0.066\* / −0.082\* | +0.008 / −0.025 |
+
+| Ablation | Recall@1: Qwen date-trained / Qwen Li-style | Trap@1: Qwen date-trained / Qwen impression / Llama Li-style / **Qwen Li-style** | Qwen Li-style Trap@1 vs Qwen date-trained |
+|---|---|---|---|
+| A1-ctrl | 0.249 / **0.675** | 0.227 / — / 0.144 / 0.136 | −0.091\* |
+| A1 Traps | 0.087 / **0.654** | 0.863 / 0.888 / 0.194 / **0.186** | −0.677\* |
+| A5 n = 1 | 0.085 / 0.639 | 0.872 / — / 0.224 / 0.229 | −0.643\* |
+| A5 n = 2 | 0.087 / 0.639 | 0.874 / — / 0.249 / 0.254 | −0.620\* |
+| A5 n = 5 | 0.084 / 0.629 | 0.881 / — / 0.314 / 0.307 | −0.574\* |
+| A5 n = 10 | 0.088 / 0.624 | 0.909 / 0.980 / 0.367 / 0.374 | −0.535\* |
+
+Qwen Li-style Recall@1 change from A1-ctrl: A1 −0.021 (n.s.), A5 −0.036\* to −0.051\*. Newest-first: 0.560 / 0.515 (Baseline), 0.603 (A1-ctrl). Qwen Li-style minus newest-first on Baseline: −0.255\* / −0.259\*.
+
+**Top pick is the newest candidate (test):** Baseline random / hard: Qwen date-trained 0.474 / 0.520, Qwen Li-style 0.306 / 0.263 (correct item newest 0.556 / 0.511). A1-ctrl (all candidates old): Qwen date-trained 0.172, Llama Li-style 0.639, Qwen Li-style **0.657** (correct item newest 0.602). A1 Traps (a trap is always newest): Qwen date-trained 0.350, Llama Li-style 0.070, Qwen Li-style **0.074**.
+
+**Dev** (150 per cell, A6 131): Baseline 0.393 / 0.360; A2 0.047 / 0.027; A3 0.033 / 0.027; A4 0.093 / 0.067; A6 0.176 / 0.176; A1-ctrl 0.720; A1 Recall@1 0.627, Trap@1 0.220; A5 Trap@1 0.253–0.367. Same direction as test in every row.
+
+**Summary.** Qwen2.5-7B repeats the Llama-2 EB-NeRD Li-style result almost cell for cell (no Trap@1 difference from Llama Li-style is significant):
+- **Not drawn to traps:** A1 Trap@1 0.186 (chance 0.20; Qwen date-trained 0.863, impression 0.888), below chance with more traps (A5 n = 10: 0.374 vs 0.867); Recall@1 with 3 traps barely moves (0.675 → 0.654, n.s.).
+- **Still date-driven among old items:** among all-old candidates its top pick is the newest one 66% of the time; swapping the correct item's date gives 0.021, hiding dates 0.022, shuffling 0.062 / 0.048 (about chance).
+- **Below newest-first** on the cold benchmark (−0.255\* / −0.259\*).
+- **Both base models, both datasets now agree:** the Li-style shortcut is "newest wins" on Amazon (traps 95–97%) and "newest among old items" on news (traps at or below chance), for Llama-2 and Qwen alike. The dataset, not the base model, decides its form.
+- Caveat: one seed; 4-bit evaluation.
